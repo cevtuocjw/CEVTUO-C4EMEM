@@ -32,6 +32,32 @@ import { navModel, catalogFor, manageModel, installFeature, removeFeature, resto
 import { runningApps, activateApp, appIcon, quitApps } from './running';
 import { pickDevice, ls as adbLs, read as adbRead, pull as adbPull, rm as adbRm, info as adbInfo, photos as adbPhotos } from './sources/adbfs';
 
+/**
+ * 把模型给的一整份方案，按它自己的 `## 功能N：名字` 标题**拆成几条独立的提案**。
+ *
+ * ⚠️⚠️ 读者 2026-10-13：「我让它自动给出来我几个功能（**不同功能**），我一键安装」
+ *    —— 原来是**一整坨 markdown 塞进一张卡**：里面三四个功能混在一起，
+ *    既没法一个一个装，也看不出「这是几个不同的东西」。拆开之后每个功能一条，
+ *    各带自己的对话和安装键。
+ * ⚠️ 拆不出来（模型没按格式写）就**原样返回一条** —— 宁可一条大的，也不要丢内容。
+ */
+function splitFeatures(md: string): { name: string; plan: string }[] {
+  const text = String(md || '');
+  const lines = text.split('\n');
+  const idx: number[] = [];
+  lines.forEach((l, i) => { if (/^\s*#{1,4}\s*功能\s*[一二三四五六七八九十\d]/.test(l)) idx.push(i); });
+  if (idx.length === 0) return [{ name: '', plan: text.trim() }];
+  const out: { name: string; plan: string }[] = [];
+  for (let k = 0; k < idx.length; k++) {
+    const start = idx[k];
+    const end = k + 1 < idx.length ? idx[k + 1] : lines.length;
+    const head = lines[start];
+    const name = (head.split(/[：:]/).slice(1).join('：') || head.replace(/^[#\s]+/, '')).trim().slice(0, 60);
+    out.push({ name, plan: lines.slice(start, end).join('\n').trim() });
+  }
+  return out;
+}
+
 /** 给取回来的手机图片猜一个 content-type —— 猜不出就交给浏览器嗅探 */
 const guessMime = (f: string) => (/\.png$/i.test(f) ? 'image/png' : /\.webp$/i.test(f) ? 'image/webp'
   : /\.(heic|heif)$/i.test(f) ? 'image/heic' : 'image/jpeg');
@@ -1057,7 +1083,9 @@ const server = Bun.serve({
           },
         ]);
         addActivity(db, { kind: 'feature', icon: '🚀', title: app ? `给「${app}」想功能` : '它想了一个功能', detail: app || wish, ms: Date.now() - t0 });
-        return json({ ok: true, wish, app, plan: String(plan) });
+        // ⭐ 一起把**拆好的几条**带回去（前端据此每条建一条提案）
+        const feats = splitFeatures(String(plan));
+        return json({ ok: true, wish, app, plan: String(plan), features: feats });
       }
       // ⭐⭐ 「**把这个软件全部断联**」—— 不是卸载你电脑上的那个软件，
       //    是把**我们这个软件里**为了用它而装的那些功能拿掉（读者 2026-10-10）。
@@ -1109,7 +1137,15 @@ const server = Bun.serve({
         if (!llm) return json({ error: '还没配 LLM key' }, 400);
         const t0 = Date.now();
         const ans = await llm.chat([
-          { role: 'system', content: '你在和一个本机知识库软件的用户讨论**一条还没做的功能提案**。只依据下面的材料回答，材料里没有的就说没有。中文，说人话，别写代码。' },
+          { role: 'system', content: '你在和一个本机知识库软件的用户讨论**一条还没做、做出来要装进这个软件的功能提案**。中文，说人话，别写代码。\n' +
+          // ⚠️⚠️⚠️ 读者 2026-10-13：「我告诉它制作的这个功能叫做 zronedrive，但是它听不懂」。
+          //    真因就是原来那句「材料里没有的就说没有」—— 模型拿**用户起的名字**去材料里查，
+          //    查不到就回「材料里没有 zronedrive 这个功能名称，我不能替它编一个出来」。
+          //    ⇒ 名字是**用户起的**，不是你从材料里查的。
+          '⚠️⚠️ **名字以用户说的为准**：他给这个功能起什么名字（比如「zronedrive」），就叫这个名字 —— '
+          + '不要因为「材料里没出现这个词」就说「没有」「不能编」。**那名字是他起的，不是你查的**；把它接过来，继续讨论怎么做。\n'
+          + '⚠️ 只有**事实**（这个软件现在有什么功能、数据里有什么）才说「材料里没有」；'
+          + '**用户提的新需求、新命名、新做法，一律照他说的办。**' },
           {
             role: 'user',
             content:
@@ -1163,6 +1199,15 @@ const server = Bun.serve({
         patchProposal(cfg.dataDir, item.id, { state: 'installed', featureId: fid });
         addActivity(db, { kind: 'feature', icon: '🚀', title: `装着提案里的功能：${r.feature.name}` });
         return json({ ok: true, feature: r.feature });
+      }
+      // ⭐ 改这条提案的**名字**（读者 2026-10-13：「直接给用户一个地方可以填写功能的名字就好了」）。
+      //   ⚠️ 名字是**用户说了算**的：他写什么就是什么，不去"材料"里查。
+      if (p.startsWith('/api/proposals/') && req.method === 'PATCH') {
+        const id = decodeURIComponent(p.slice('/api/proposals/'.length));
+        const b = (await req.json().catch(() => ({}))) as { title?: string };
+        const r = patchProposal(cfg.dataDir, id, { title: String(b.title ?? '').trim().slice(0, 80) });
+        if (!r.ok) return json({ error: r.error }, 404);
+        return json(r);
       }
       if (p.startsWith('/api/proposals/') && req.method === 'DELETE') {
         const id = decodeURIComponent(p.slice('/api/proposals/'.length));

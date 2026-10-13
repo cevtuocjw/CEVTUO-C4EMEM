@@ -64,8 +64,23 @@ function save(dataDir: string, s: Store) {
 
 /** 从模型给的那段文字里抠出一句话当标题 —— 不另花一次调用。 */
 function titleOf(text: string, app: string): string {
-  const first = String(text).split('\n').map((s) => s.replace(/^[\s#*\d.、）-]+/, '').trim()).find((s) => s.length >= 6);
-  return (first ?? (app ? `给「${app}」加个功能` : '一个新功能')).slice(0, 80);
+  const lines = String(text).split('\n');
+  // ⚠️⚠️ 原来的兜底是"取第一行够长的"，于是老提案的标题变成了
+  //    `先说结论：**Clash Party 接不了` —— **把正文第一行当名字**，
+  //    列表里一屏全是这种。读者 2026-10-13 说"看不出来是什么"。
+  //    ⇒ ① 有 `## 功能N：名字` 这种标题就**优先用标题**（那才是给它起的名字）；
+  //       ② 洗掉 markdown 记号和「先说结论：」这种开场白。
+  const clean = (x: string) => x
+    .replace(/^\s*#{1,4}\s*/, '')
+    .replace(/^\s*功能\s*[一二三四五六七八九十\d]+\s*[：:]\s*/, '')
+    .replace(/^\s*先说结论\s*[：:]\s*/, '')
+    .replace(/[*`>]/g, '')
+    .trim();
+  const head = lines.find((l) => /^\s*#{1,4}\s+\S/.test(l));
+  const fromHead = head ? clean(head) : '';
+  if (fromHead.length >= 2) return fromHead.slice(0, 60);
+  const first = lines.map(clean).find((x) => x.length >= 6);
+  return (first ?? (app ? `给「${app}」加个功能` : '一个新功能')).slice(0, 60);
 }
 
 export function addProposal(dataDir: string, p: { app?: string; plan: string; title?: string }) {

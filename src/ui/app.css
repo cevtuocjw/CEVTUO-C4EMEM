@@ -1602,3 +1602,14 @@ body.narrow .tbar,body.narrow .flowbar{padding-left:68px;padding-right:68px;flex
 .ptile.loading{opacity:.6}
 .ptile.on{padding:0;border-color:var(--lime)}
 .ptile img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* ⭐ 功能提案（2026-10-13 读者要的：先选方向 → 一个块 → 块内**气泡**对话） */
+.proprow{padding:8px 0;border-bottom:1px solid var(--line2)}
+.propblock{padding:14px 16px}
+.pchat{margin-top:12px;display:flex;flex-direction:column;gap:7px;max-height:340px;overflow:auto}
+.pchat .pb{display:flex}
+.pchat .pb.me{justify-content:flex-end}
+.pchat .pb.it{justify-content:flex-start}
+.pchat .pbt{max-width:78%;padding:8px 12px;border-radius:14px;font-size:13px;line-height:1.6}
+.pchat .pb.me .pbt{background:#e9f5c0;border:1px solid #d3e694;border-bottom-right-radius:5px}
+.pchat .pb.it .pbt{background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:5px}

@@ -3937,6 +3937,9 @@ function renderKb() {
       const cats = (f.catalog || []).filter((c) => c.ready);
       const apps = a.apps || [];
       const props = pr.items || [];
+      // 选中的那条（存 localStorage —— 刷新/重开还在那个块里，不然每次都要重挑）
+      let PROP_ACTIVE = '';
+      try { PROP_ACTIVE = localStorage.getItem('c4propActive') || ''; } catch { PROP_ACTIVE = ''; }
       const spaces = (s.bySpace || []).map((x) => '<span class="badge">' + esc(x.space) + ' ' + x.n + '</span>').join(' ');
 
       // 这个软件已经装了哪些功能（按 source 归）
@@ -3957,31 +3960,79 @@ function renderKb() {
         '<b>' + esc(x.name) + '</b>' + (x.known ? '<span class="badge">已接</span>' : '') +
         '<span class="k" style="margin-left:auto">' + esc(x.group) + '</span></div>').join('');
 
-      const propCard = (x) => {
+      // ═══ 功能提案：**先选方向 → 只剩一个块 → 块内气泡对话 → 合适了安装** ═══
+      //   读者 2026-10-13 原话拆成六条：
+      //     ·「你一开始的时候就**猜测好用户想要的功能方向，然后用户选择**」
+      //     ·「**选择之后其他的都不要了**，除非用户点击**换一个功能制作**」
+      //     ·「你要在这个块内**来回对话**，用户给你对话，你给用户对话，**都是气泡的形式**」
+      //     ·「**直接给用户一个地方可以填写功能的名字**就好了」
+      //     ·「沟通好了之后**制作**这个功能」「询问用户**是否没有问题了**，没有问题就可以点击安装」
+      //     ·「这样让界面**简单**」
+      //   ⚠️ 全部状态就一个：`PROP_ACTIVE`（选中的那条 id，存 localStorage）。
+      //     它空 ⇒ 显示"方向"列表；它指向某条 ⇒ **只画那一条**。
+      const bubble = (who, text) =>
+        '<div class="pb ' + (who === 'me' ? 'me' : 'it') + '"><div class="pbt">' + esc(text) + '</div></div>';
+      // 一问一答 → 两条气泡（读者的：他给你对话、你给用户对话）
+      const thread = (x) => (x.msgs || []).map((m) => bubble('me', m.q) + bubble('it', m.a)).join('');
+
+      // ── 一个"方向"（还没选中的那条）：一排，点「就做它」 ──
+      const propRow = (x) => {
+        const one = String(x.plan || '').replace(/[#*`>\-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 78);
+        return '<div class="frow proprow" data-prop="' + esc(x.id) + '">' +
+          '<b style="flex:none">' + esc(x.title || '（没起名字）') + '</b>' +
+          '<span class="k" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(one) + '</span>' +
+          '<button class="go sm" data-pick="' + esc(x.id) + '">就做它</button>' +
+          '<button class="ghost sm" data-pdel="' + esc(x.id) + '">删</button></div>';
+      };
+
+      // ── 选中的那一条：一个块，里面有名字、方案、气泡对话、和三个动作 ──
+      const propBlock = (x) => {
         const m = matchOf(x.app);
         const badge = { idea: '还没做', planned: '有步骤了', installed: '已装上' }[x.state] || x.state;
-        const msgs = (x.msgs || []).map((mm) =>
-          '<div class="q" style="font-weight:560;margin-top:6px">' + esc(mm.q) + '</div>' +
-          '<div class="a" style="white-space:pre-wrap;font-size:13px;opacity:.92">' + esc(mm.a) + '</div>').join('');
-        return '<div class="card" data-prop="' + esc(x.id) + '" data-app="' + esc(x.app || '') + '">' +
-          '<div style="display:flex;gap:10px;align-items:baseline">' +
+        const said = (x.msgs || []).length
+          ? thread(x)
+          : bubble('it', '我按你这个方向想了一版方案（点下面「方案」能展开）。' +
+              '哪里不对直接说；名字也能自己改 —— 改完没问题，就点最右边那颗安装。');
+        return '<div class="card propblock" data-prop="' + esc(x.id) + '" data-app="' + esc(x.app || '') + '">' +
+          '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">' +
             '<span class="badge">' + esc(badge) + '</span>' +
             (x.app ? '<span class="k">' + esc(x.app) + '</span>' : '') +
-            '<b style="flex:1;font-weight:560">' + esc(x.title) + '</b>' +
-            '<button class="ghost sm" data-pdel="' + esc(x.id) + '">删</button></div>' +
-          '<div class="pbody" style="white-space:pre-wrap;font-size:13px;margin-top:8px;max-height:230px;overflow:auto">' +
-            esc(x.plan) + '</div>' +
-          msgs +
+            '<input data-pname="' + esc(x.id) + '" value="' + esc(x.title || '') + '" ' +
+              'title="这个功能叫什么，你自己写 —— 写了就算数" ' +
+              'style="flex:1;min-width:200px;font-weight:560;font-size:15px">' +
+            '<button class="ghost sm" data-pdrop="1" title="回到那几个方向，重新挑一个">换一个功能制作</button>' +
+            '<button class="ghost sm" data-pdel="' + esc(x.id) + '">删</button>' +
+          '</div>' +
+          '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12.5px;color:var(--dim)">方案</summary>' +
+            '<div class="pbody" style="white-space:pre-wrap;font-size:13px;margin-top:8px;max-height:300px;overflow:auto">' +
+              esc(x.plan) + '</div></details>' +
+          '<div class="pchat">' + said + '</div>' +
           '<div class="row" style="margin-top:10px">' +
-            '<input data-pq="' + esc(x.id) + '" placeholder="就这条提案接着问…">' +
-            '<button class="go sm" data-pask="' + esc(x.id) + '">沟通</button>' +
+            '<input data-pq="' + esc(x.id) + '" placeholder="接着说 —— 它按你说的改（名字也算，你说叫什么就叫什么）">' +
+            '<button class="go sm" data-pask="' + esc(x.id) + '">发送</button>' +
             (x.state === 'installed'
               ? '<button class="ghost sm" disabled>已装上</button>'
-              : '<button class="ghost sm" data-pplan="' + esc(x.id) + '">开始制作</button>') +
+              : '<button class="ghost sm" data-pplan="' + esc(x.id) + '">先出实现步骤</button>') +
             (m
               ? '<button class="go sm" data-pinst="' + esc(x.id) + '" data-fid="' + esc(m.id) + '">安装「' + esc(m.name) + '」</button>'
-              : '<button class="ghost sm" disabled title="还没有对应的功能可以装 —— 先「开始制作」，让它出实现步骤">还没做</button>') +
-          '</div></div>';
+              : '<button class="ghost sm" disabled title="还没有对应的功能可以装 —— 先「先出实现步骤」">还没做</button>') +
+          '</div>' +
+          '<div class="k" style="margin-top:8px">聊到你觉得没问题了，就点上面那颗<b>安装</b>。</div>' +
+        '</div>';
+      };
+
+      // ── 总入口：选过了就只画那一条，没选就画"方向"列表 ──
+      const propList = () => {
+        if (!props.length) return '';
+        const cur = props.find((x) => x.id === PROP_ACTIVE);
+        if (cur) {
+          const others = props.length - 1;
+          return (others > 0
+            ? '<div class="k" style="margin-bottom:8px">还有 ' + others + ' 个方向，已经收起来了 —— 想换就点块里的「换一个功能制作」。</div>'
+            : '') + propBlock(cur);
+        }
+        return '<div class="k" style="margin-bottom:8px">它猜了几个方向，**先挑一个**：挑完就只剩它一个，其余收起来。</div>' +
+          props.map(propRow).join('');
       };
 
       // ⭐⭐ 功能管理（读者 2026-10-10）：
@@ -4065,7 +4116,7 @@ function renderKb() {
             '<b>安装</b>（真的加进侧栏）。⚠️ 「开始制作」只出步骤，不写代码 —— ' +
             '自动写代码再自动上线，失败时是静默的（页面照常、只是点开是空的）。</div>'
             : '<div class="k">还没有。上面选个软件让它想，或者在下面直接说。</div>') +
-          '<div style="margin-top:10px">' + props.map(propCard).join('') + '</div></div>' +
+          '<div style="margin-top:10px">' + propList() + '</div></div>' +
 
         // ── 主动式：打勾它才会主动来找你 ─────────────────────
         '<div class="card"><div class="m">主动式 · 让功能自己来找你 · ' + proCapable.length + ' 个可勾</div>' +
@@ -4211,6 +4262,33 @@ function renderKb() {
         toast('出步骤了，往下看');
         renderKb();
       }));
+      // 「就做它」—— 选完其余收起来
+      $$('[data-pick]').forEach((b) => (b.onclick = () => {
+        PROP_ACTIVE = b.dataset.pick;
+        try { localStorage.setItem('c4propActive', PROP_ACTIVE); } catch { /* 存不上也照样能用 */ }
+        renderKb();
+      }));
+      // 「换一个功能制作」—— 回到方向列表（其余的**没删**，只是收起来了）
+      $$('[data-pdrop]').forEach((b) => (b.onclick = () => {
+        PROP_ACTIVE = '';
+        try { localStorage.removeItem('c4propActive'); } catch { /* 同上 */ }
+        renderKb();
+      }));
+      // 名字：**你写什么就是什么**（读者：「直接给用户一个地方可以填写功能的名字」）。
+      // ⚠️ 之前这里是靠"猜"的 —— 模型拿用户起的名字去材料里查，查不到就回"没有"。
+      //    现在名字是一个**可编辑的输入框**，回车或失焦就存。
+      $$('[data-pname]').forEach((i) => {
+        const save = async () => {
+          const t = i.value.trim();
+          if (t === (props.find((x) => x.id === i.dataset.pname)?.title || '')) return;  // 没改就别发
+          const r = await fetch('/api/proposals/' + encodeURIComponent(i.dataset.pname), {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t }),
+          }).then((x) => x.json()).catch(() => ({ error: '存不上' }));
+          if (r && r.error) toast(r.error, 'bad'); else toast('名字记下了：' + (t || '（空）'));
+        };
+        i.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); i.blur(); } };
+        i.onblur = save;
+      });
       $$('[data-pinst]').forEach((b) => (b.onclick = async () => {
         b.disabled = true;
         const r = await post('/api/proposals/install', { id: b.dataset.pinst, featureId: b.dataset.fid });
