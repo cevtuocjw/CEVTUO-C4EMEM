@@ -859,7 +859,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         //    `yieldActivation(to:)` **不够** —— 得**真的先不活动**。
         //    ⇒ 顺序必须是：**先把自己撤下来 → 再叫目标 App → 再无声地把宠物放回来**。
         let petWasVisible = petWindow?.isVisible ?? false
-        if petWasVisible { petWindow?.orderOut(nil) }
+        // ⚠️⚠️ 读者 2026-10-13：「**不想让 Pet 一点击软件的时候就闪一下**，
+        //    应该点击 app 就只有一圈 app 不显示，而 Pet 依旧在」。
+        //    原来这里**一上来就 `orderOut`**（把宠物从屏幕上撤走）再去 activate，
+        //    1.2 秒后才放回来 ⇒ 眼睛看到的就是"Pet 闪掉了一下"。
+        //    ⇒ 正常路径**不再撤窗**：让出前台的关键那一步是 `NSApp.deactivate()`，
+        //      窗口留不留在屏幕上跟"能不能激活别人"是两件事。
+        //      万一没叫上来（下面 probe 探得到），才退回"把自己撤走"那套。
         NSApp.deactivate()
 
         let bid = Bundle(path: path)?.bundleIdentifier ?? ""
@@ -882,6 +888,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 //    `frontmostApplication` 也确实是它，**但窗口不上来**。
                 //    读者 2026-10-13 专门点了名：「点击 deepseek chat native 还是跳不到前面来」。
                 ok = running.activate(from: .current, options: [.activateAllWindows])
+            // ⚠️⚠️ 光 activate **不够**：它只把「应用」带到前台。目标 App 的窗口
+            //    被最小化 / 只有一个隐藏窗口时，窗口根本不上来 —— 而 `ok=true`、
+            //    `frontmostApplication` 确实是它，日志里一切正常。
+            //    `NSWorkspace.openApplication` 对**已经在跑**的 App 发的是
+            //    `kAEReopenApplication` ⇒ 那正是"把主窗口弄回来"的那条路
+            //    （点 Dock 图标走的就是它）。读者点名的 `Deepseek Chat Natvie` 正是这种。
+            if let u = Bundle(path: path)?.bundleURL {
+                let ro = NSWorkspace.OpenConfiguration()
+                ro.activates = true
+                NSWorkspace.shared.openApplication(at: u, configuration: ro) { _, _ in }
+            }
             } else {
                 ok = running.activate(options: [.activateIgnoringOtherApps])
             }
@@ -890,9 +907,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
                 petLog("probe0.30 front=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")")
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.20) {
-                petLog("probe1.20 front=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")")
-                restore()
+            let petWin = petWindow
+            // ⚠️ 自适应：0.30s 后看一眼有没有把目标叫上来。
+            //    叫上来了 ⇒ 直接把宠物放回去（**全程没撤过窗，不会闪**）；
+            //    没叫上来 ⇒ 才退回"把自己撤走再叫一次"那套（会有一下闪，但总比不动好）。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+                let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
+                petLog("probe0.30 front=\(front)")
+                if front != bid, let petWin, petWasVisible {
+                    petLog("目标没到前台 ⇒ 退回「让位」那套")
+                    petWin.orderOut(nil)
+                    running.activate(from: .current, options: [.activateAllWindows])
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { restore() }
+                } else {
+                    restore()
+                }
             }
             return
         }
