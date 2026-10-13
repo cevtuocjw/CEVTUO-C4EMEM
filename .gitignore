@@ -13,7 +13,7 @@ dist/
 #    它由 `bash app/build.sh` 生成 —— 进仓库只会让每次提交都拖一个 82M 的二进制，
 #    而且**那份快照会和真源码悄悄分叉**（改了 src/ui 忘了重新打包，包里就是旧的）。
 out/
-app/C4emem.app/
+app/*.app/
 app/.build.swift
 pet-bridge.log
 __pycache__/

@@ -124,6 +124,21 @@ console.log('② 点偏一点：落在**同一格的扇形带上**（没压在�
   await p.close();
 }
 
+console.log('③ 只按下、**不抬手** —— 也必须已经发出 launch（`click` 被 AppKit 吞掉时的兜底）');
+{
+  const { p, info } = await openWheel();
+  const t = info.items.find((s) => s.path.includes('Delta'));
+  await p.mouse.move(t.cx, t.cy);
+  await p.waitForTimeout(60);
+  await p.mouse.down();                          // ⚠️ 故意不 up：模拟"up 没到网页"
+  await p.waitForTimeout(350);
+  const sent = await p.evaluate(() => window.__sent);
+  const L = sent.filter((m) => m && m.cmd === 'launch');
+  ok(L.length === 1 && L[0].path.includes('Delta'), '按下就发出了 launch Delta', JSON.stringify(sent));
+  await p.mouse.up();
+  await p.close();
+}
+
 await b.close();
 console.log('\n通过 ' + passes + ' / 失败 ' + fails);
 process.exit(fails ? 1 : 0);

@@ -1,15 +1,13 @@
 /**
- * 读者 2026-10-13：「**这上边怎么有一个灰色正方形**」。
- * 那其实是 Pet 本体那张卡（`#petbody .ck`，53×92 的竖长矩形）—— 展开轮盘时它正好落在
- * **正中央**：既压住扇区，又在透明窗里渲染成一块认不出来的毛玻璃方片。
- * ⇒ 展开时把它收掉（`body.pw-on #petbody{opacity:0}`），收起时照旧。
+ * 读者 2026-10-13 的第二句：「鼠标放上去就没有了，**我需要的是继续它存在**，
+ * 然后出现那些 app 的 logo」。
  *
- * 三条断言，判据都是**量出来的**：
- *   ① 收起时卡片必须**看得见**（不能把它永久藏了）；
- *   ② 展开时卡片必须**看不见**；
- *   ③ 展开时**每一格都不能被卡片盖住** —— 判据用 `elementFromPoint` 打在每格中心，
- *      这一条才是"正方形没了"的**真正契约**（前两条只说明卡片淡出了，
- *      万一是别的东西盖着也照样过）。
+ * 背景：他先报了「轮盘中央有一个灰色正方形」，我**把那块卡整个藏了**
+ * （`body.pw-on #petbody{opacity:0}`）—— 那不是他要的：展开轮盘时 **Pet 必须照样在**。
+ * ⇒ 已撤回。这一支就是钉住"撤回之后它真的还在"。
+ *
+ * ⚠️ 顺带一条教训（写在这儿免得下次再犯）：把"看着不对的东西"直接隐藏，
+ *    是按下了**症状**；"它不该在这儿"和"它在这儿但长得不对"是两件事，先问清哪一件。
  */
 import { chromium } from '/Users/cjw/Documents/DSP Deepseek/pingfang-factcheck/node_modules/playwright-core/index.js';
 
@@ -35,43 +33,36 @@ await p.evaluate((apps) => {
     : of(u, o));
 }, FAKE);
 
-const cardOpacity = () => p.evaluate(() => {
+const card = () => p.evaluate(() => {
   const e = document.querySelector('#petbody');
-  if (!e) return null;
   const r = e.getBoundingClientRect();
   return { op: Number(getComputedStyle(e).opacity), w: Math.round(r.width), h: Math.round(r.height) };
 });
 
-console.log('① 轮盘收起时：卡片应当看得见');
+console.log('① 轮盘收起时：Pet 在');
 {
-  const c = await cardOpacity();
-  ok(c && c.op > 0.95, '卡片 opacity ≈ 1', JSON.stringify(c));
-  ok(c && c.w > 10 && c.h > 10, '卡片有实际尺寸（不是被压成 0）', JSON.stringify(c));
+  const c = await card();
+  ok(c.op > 0.95 && c.w > 10 && c.h > 10, 'Pet 可见且有尺寸', JSON.stringify(c));
 }
 
-console.log('② 轮盘展开后：卡片应当看不见');
+console.log('② 鼠标放上去（轮盘展开）：**Pet 必须还在**（读者 2026-10-13 明确要求）');
 await p.evaluate(() => window.__petOpen());
 await p.waitForTimeout(700);
 {
-  const c = await cardOpacity();
-  ok(c && c.op < 0.05, '卡片 opacity ≈ 0', JSON.stringify(c));
-
-  // ③ 真正的契约：每一格的中心，问到的必须是那一格自己（不是被卡片压着）
-  const cover = await p.evaluate(() => {
-    const out = [];
-    document.querySelectorAll('#pwwheel .pwic').forEach((el) => {
-      const r = el.getBoundingClientRect();
-      const hit = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
-      if (!hit || !hit.closest?.('.pwic')) {
-        out.push({ i: el.dataset.i, 命中: hit ? hit.tagName.toLowerCase() + '.' + String(hit.className).split(' ')[0] : 'null' });
-      }
-    });
-    return out;
-  });
-  ok(cover.length === 0, '每一格的中心都命中它自己（没有被别的东西盖住）', JSON.stringify(cover));
+  const c = await card();
+  ok(c.op > 0.95, '展开时 Pet 照样可见（不是被藏起来）', JSON.stringify(c));
+  ok(c.w > 10 && c.h > 10, '展开时 Pet 有实际尺寸', JSON.stringify(c));
 
   const n = await p.evaluate(() => document.querySelectorAll('#pwwheel .pwic').length);
-  ok(n === FAKE.length, '扇里 ' + FAKE.length + ' 格都在', String(n));
+  ok(n === FAKE.length, '同时那些 app 的 logo 也在（' + FAKE.length + ' 格）', String(n));
+}
+
+console.log('③ 收起来之后 Pet 不能变成半透明（状态要还原）');
+await p.evaluate(() => window.__petHover(false));
+await p.waitForTimeout(900);
+{
+  const c = await card();
+  ok(c.op > 0.95, '收起后仍是完全不透明', JSON.stringify(c));
 }
 
 await p.screenshot({ path: '/tmp/pet-card.png' });

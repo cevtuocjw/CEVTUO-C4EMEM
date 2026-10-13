@@ -687,6 +687,23 @@ document.addEventListener('pointerdown', (e) => {
  *    而点扇区时我们**根本没有开始拖**（见 pointerdown 那一句提前 return）⇒
  *    那条路永远走不到。"点扇区没反应"就是这么来的。
  */
+// ⚠️⚠️ **按下就选中**（2026-10-13 加的，处理读者第二次报的「点击…没有反应」）。
+//    `click` 要求 down 和 up **落在同一个元素上**；而这块面板是"展开就抢焦点"的
+//    （实测展开后还要 250~300ms 窗口才真的成为 key，见 client.log 的
+//    「键盘状态 已接通 / 网页有焦点=false → true」那两行）——
+//    落在那个缝里的那一次点击，up 可能被 AppKit 吃掉 ⇒ **`click` 永远不来**，
+//    屏幕上就是"点了没反应"，而日志里连一条都没有。
+//    ⇒ 按下即选（径向菜单的常规做法），也更贴合"要飞速打开"。
+//    `pick()` 里会 `closeWheel()`，那一圈随即消失 ⇒ 后面那次 `click` 落在空处，
+//    **不会重复触发**。
+$('#pwwheel').addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  const seg = e.target.closest?.('.pwic, .pwsg');
+  if (!seg) return;
+  e.preventDefault();          // 免得再补一次 click（同一次按下只想选一次）
+  pick(Number(seg.dataset.i));
+});
+
 $('#pwwheel').addEventListener('click', (e) => {
   // ⭐ **两个都算选中**：压在图标上、或压在它那一段扇形带（`.pwsg`）上 —— 判据和悬停一致，
   //    都是"落在这一个扇区的角度 + 半径范围里"。图标只有 22~30px，而扇区带宽 38~52px，
