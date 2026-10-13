@@ -27,7 +27,7 @@ SRC="$HERE/.build.swift"
 sed "s|__PROJECT_DIR__|$PROJECT|g" "$HERE/C4ememApp.swift" > "$SRC"
 
 # ── Info.plist ───────────────────────────────────────────────
-# ⚠️ LSUIElement=true 是菜单栏 App 的关键：没有它会在 Dock 里多一个图标。
+# ⚠️ LSUIElement **2026-10-13 起是 false**（读者要在 Dock 里看见它）—— 见下面那段说明。
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,10 +38,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>com.cevtuo.c4emem</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.6</string>
-  <key>CFBundleVersion</key><string>7</string>
+  <key>CFBundleShortVersionString</key><string>0.1.7</string>
+  <key>CFBundleVersion</key><string>8</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
-  <key>LSUIElement</key><true/>
+  <!-- ⭐⭐ 2026-10-13 读者：「我点击这个软件，**没有 logo 在我的 dock 栏里展示**」。
+       原来是 `LSUIElement=true`（纯菜单栏 App，Dock 里没有图标）—— 那是当初的设计，
+       读者现在明确要**在 Dock 里看得见**。
+       ⇒ 关掉它。副作用（都是好的）：Dock 图标 + 应用切换器里有它，
+         而且**点 Dock 图标本质就是 `reopen` 事件** ⇒ 直接走
+         `applicationShouldHandleReopen` 把主界面叫出来。 -->
+  <key>LSUIElement</key><false/>
   <key>NSHighResolutionCapable</key><true/>
   <!-- ⚠️ 没有这一段，App 连不上 http://127.0.0.1:8770：
        ATS 默认拦明文 HTTP ⇒ 状态一直显示 "C4×"，而且内嵌窗口会是一片空白。
@@ -135,3 +141,12 @@ echo "✅ 生成 $APP  （$(du -sh "$APP" | cut -f1)）"
 echo "✅ 已装到 $DST"
 echo "   打开： open '$DST'"
 echo "   以后开机自启：系统设置 → 通用 → 登录项 → 添加这个 App"
+
+# ⚠️⚠️ **最后一步**才把构建产物删掉 —— 读者 2026-10-13：「我电脑上一堆的 c4emem 的软件 app,
+#     最终只留最后一个的版本」。留两份的后果不只是占地方：**两个同 bundle id 的副本**
+#     会让 Spotlight / 启动台里出现两个图标，而且 `open -a` 认哪个全凭运气。
+#     要打 dmg 就从 /Applications 那一份打。
+#     ⚠️ 必须放在最后：`du -sh` 报尺寸那行在上面，先删了它就只剩一个空括号。
+rm -rf "$APP"
+rm -rf "$HERE/C4emem.app"          # 改名之前留下的那个产物，也一并清掉
+echo "✅ 已清掉构建产物（机器上只剩 $DST 这一份）"

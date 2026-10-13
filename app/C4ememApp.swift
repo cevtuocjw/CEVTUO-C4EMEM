@@ -877,7 +877,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             var ok = false
             if #available(macOS 14.0, *) {
                 NSApp.yieldActivation(to: running)
-                ok = running.activate(from: .current, options: [])
+                // ⚠️⚠️ `.activateAllWindows` 不能省：光 `activate` 只把**应用**带到前台，
+                //    而这个 App 的窗口可能被压在后面 / 在别的空间 ⇒ `ok=true`、
+                //    `frontmostApplication` 也确实是它，**但窗口不上来**。
+                //    读者 2026-10-13 专门点了名：「点击 deepseek chat native 还是跳不到前面来」。
+                ok = running.activate(from: .current, options: [.activateAllWindows])
             } else {
                 ok = running.activate(options: [.activateIgnoringOtherApps])
             }
@@ -935,6 +939,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered, defer: false)
             w.title = "cevtuo-c4emem"
+            // ⚠️⚠️ 读者 2026-10-13：「这个软件的**最上边不应该是黑色的一条**」。
+            //    界面自己**永远是浅色**（app.css 的 `--bg:#f7f7f4`，而且那里**没有**
+            //    `prefers-color-scheme` 分支），而读者的 Mac 是深色模式 ⇒ 系统给窗口
+            //    画的标题条是**黑的**，顶上就横着一条黑。
+            //    ⇒ 把窗口外观钉死成浅色（和页面同一条路），别再跟系统走。
+            w.appearance = NSAppearance(named: .aqua)
             w.center()
             w.minSize = NSSize(width: 900, height: 600)
             // ⚠️ 主窗口这一份也要挂桥：界面里那个"窗口内浮层"版 Pet 右键时要能叫 Swift
