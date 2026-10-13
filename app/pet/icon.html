@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  /* ⚠️ 图标是**渲染出来再截图**的（本机没有 PNG 编解码器，sips 只能缩放不能合成）。
+     读者 2026-10-13：「你截取一个在铅的中间放上 **不要做任何改动（没有背景的作为就好了）**」
+     ⇒ 这一页只做"摆位置"：把已经抠好底的那张（`app/pet/rose.png`，由 cut-pet.mjs 生成）
+        居中放到深色圆角底盘上。**画面本身一个像素都不改**。 */
+  html,body{margin:0;width:1024px;height:1024px;overflow:hidden;background:transparent}
+  .plate{width:1024px;height:1024px;border-radius:228px;
+    background:radial-gradient(120% 120% at 28% 18%, #2c2b31 0%, #1b1a1f 58%, #131217 100%);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow: inset 0 2px 0 rgba(255,255,255,.10), inset 0 -6px 40px rgba(0,0,0,.55)}
+  /* ⚠️ 玫瑰是"瘦高"的（920×1853）—— 按高度定尺寸，宽度自然留白，
+     这样它在 Dock 的小尺寸下也是**立着的一支**，而不是被压扁的一团。 */
+  .plate img{height:660px;width:auto;display:block;
+    filter:drop-shadow(0 10px 22px rgba(0,0,0,.45))}
+</style></head>
+<body>
+  <div class="plate"><img src="rose.png" alt=""></div>
+</body></html>

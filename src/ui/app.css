@@ -1613,3 +1613,44 @@ body.narrow .tbar,body.narrow .flowbar{padding-left:68px;padding-right:68px;flex
 .pchat .pbt{max-width:78%;padding:8px 12px;border-radius:14px;font-size:13px;line-height:1.6}
 .pchat .pb.me .pbt{background:#e9f5c0;border:1px solid #d3e694;border-bottom-right-radius:5px}
 .pchat .pb.it .pbt{background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:5px}
+
+/* 「它打算这么做」那张卡（2026-10-13）——
+   ⚠️ 它的作用是**在用户按下去之前**把"它要对我的电脑做什么"摊开。
+   没有它的话，「就这么做」就是让人闭眼签字。 */
+.specbox{border:1px solid rgba(0,0,0,.10);background:rgba(215,242,74,.10);
+  border-radius:10px;padding:10px 12px;margin-top:10px}
+.speclist{margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.7}
+.speclist li{list-style:disc}
+
+/* ⭐ 静态图那个形态（银玫瑰，2026-10-13）。
+   ⚠️⚠️ 必须单独一条：`.petbody` 默认是 104×104 的**圆**、img 是 `object-fit:cover`，
+      而玫瑰是**瘦高 + 透明底**的图 —— 用默认那套会把它裁掉一半，
+      而且圆的底色 `#131418` 会从透明处透出来（看起来像"这个形态坏了"）。
+   ⇒ contain + 去掉底色和圆角；高度撑满，宽度跟着走。 */
+.petbody img.still{object-fit:contain;background:none;border-radius:0;
+  width:auto;height:104px;filter:drop-shadow(0 6px 14px rgba(0,0,0,.45))}
+.pet:hover .petbody img.still{filter:drop-shadow(0 8px 20px rgba(215,242,74,.45))}
+
+/* ══ 2D 形态的「厚度」（读者 2026-10-13）════════════════════════
+   「我希望如果是 2D 的你能够给它**一点厚度**让它旋转」
+   ⇒ 同一张图叠 16 层、往 Z 上错开 ±2.6px，各层按离中面远近压暗。
+     转起来就露出"边"，读起来是个**有厚度的东西**，而不是一张纸。
+
+   ⚠️⚠️ 容器必须 `transform-style:preserve-3d`，否则各层被**拍平**成一坨
+      （纪律 16 那一族：祖先上的 transform/filter/opacity 都会把 3D 压平），
+      而压平之后**看起来只是有点模糊**，不会报任何错。
+   ⚠️ 压暗用 `filter`，但**只能挂在叶子上**（挂在容器上会连 3D 一起压平）。 */
+.petbody.pslab{width:104px;height:104px;border-radius:0;background:none;padding:0;border:0}
+.petbody .slab{position:absolute;inset:0;transform-style:preserve-3d;
+  animation:slabspin 18s ease-in-out infinite}
+.petbody .slab .sl{position:absolute;inset:0;background-size:contain;
+  background-position:center;background-repeat:no-repeat;will-change:transform}
+@keyframes slabspin{
+  0%,100%{transform:rotateX(3deg) rotateY(-24deg)}
+  50%    {transform:rotateX(3deg) rotateY(24deg)}}
+
+/* ⭐ 一键「不转」（读者 2026-10-13：「所有的都可以选择是否旋转…默认旋转」）。
+   ⚠️ 用 `animation:none` 而不是 `paused` —— `paused` 会**冻在当场的那个角度**
+      （可能正好是个看不出来是什么的侧角），而 `none` 让它回到正面那一帧。
+   ⚠️ 视频不吃 CSS 的 animation，得由 JS `pause()`（见 pet.js）。 */
+.petbody.pstill *{animation:none !important}

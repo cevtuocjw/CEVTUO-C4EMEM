@@ -28,7 +28,7 @@ import { createReranker } from './retrieve/rerank';
 import { createLlm, buildAnswerPrompt } from './llm';
 import { indexDocs } from './sync';
 import { loadManual, addManual, removeManual, mergeVocab, mergeLinks, mergeTax, vocabExistsIn, type ManualKind, type ManualStore } from './kbmanual';
-import { navModel, catalogFor, manageModel, installFeature, removeFeature, restoreFeature, setFeatureOff, setFeatureProactive, proactiveMarks, disconnectSource, sourceFeatureCount, BUILTIN, CATALOG, loadStore, settingsModel } from './features';
+import { installCustom, navModel, catalogFor, manageModel, installFeature, removeFeature, restoreFeature, setFeatureOff, setFeatureProactive, proactiveMarks, disconnectSource, sourceFeatureCount, BUILTIN, CATALOG, loadStore, settingsModel } from './features';
 import { runningApps, activateApp, appIcon, quitApps } from './running';
 import { pickDevice, ls as adbLs, read as adbRead, pull as adbPull, rm as adbRm, info as adbInfo, photos as adbPhotos } from './sources/adbfs';
 
@@ -79,6 +79,8 @@ import { threads, linkStats } from './threads';
 import { discoverProjects, loadProjects, addProject, removeProject } from './projects';
 import { cachedApps } from './apps';
 import { loadProposals, addProposal, patchProposal, appendMsg, removeProposal } from './proposals';
+import { applySource, parseSpec, type SourceSpec } from './sourcekit';
+import { loadPets, savePet, removePet, probeUrl, fetchImage } from './petmaker';
 import { refreshPanel, listPanel, setPanelState } from './panel';
 
 const cfg = loadConfig();
@@ -1210,7 +1212,23 @@ const server = Bun.serve({
           '⚠️⚠️ **名字以用户说的为准**：他给这个功能起什么名字（比如「zronedrive」），就叫这个名字 —— '
           + '不要因为「材料里没出现这个词」就说「没有」「不能编」。**那名字是他起的，不是你查的**；把它接过来，继续讨论怎么做。\n'
           + '⚠️ 只有**事实**（这个软件现在有什么功能、数据里有什么）才说「材料里没有」；'
-          + '**用户提的新需求、新命名、新做法，一律照他说的办。**' },
+          + '**用户提的新需求、新命名、新做法，一律照他说的办。**\n'
+          // ══════════════════════════════════════════════════════════════
+          // ⭐⭐ 2026-10-13 读者：「你要能接 api deepseek 然后做出来一个对话反复处理，
+          //    **最终能帮我做出来这个功能**」——
+          //    而在此之前，这里**只出文字**（`/api/proposals/plan` 明确写着"不写代码"）。
+          // ⇒ 现在让它在**表达得了**的时候，把那份定义吐成一段结构化 JSON；
+          //    服务端把它抠出来 → 由 `sourcekit.applySource` **确定性地**做出来。
+          // ⚠️ 这不是"让模型写代码"（那条路这个项目刻意否掉了，理由见 proposals.ts 开头），
+          //    是**让模型填一张表**：读哪里、读什么、叫什么。
+          //    做出来的是真东西 —— 索引真的文件、进真的库、回真的条数。
+          + '\n\n【重要】如果你已经把这件事想清楚了，**在回答的最后**附一段（只在最后，只附一次）：\n'
+          + '```spec\n{"kind":"folder","name":"<他给的名字>","path":"<要读的目录，知道就写，不知道就留空>","exts":["md","txt"]}\n```\n'
+          + '其中 `kind` 只能是 `folder`（读一个本地文件夹）或 `url`（读一个网址）。\n'
+          + '⚠️ **不确定就先别附** —— 先把他问清楚（比如目录到底在哪）。附了就代表你建议**现在就这么做**。\n'
+          + '⚠️ 如果这件事**不是**这两种（比如要连一个在线服务、要调一个 API），'
+          + '就**不要附** spec，并用一句话说清「这一步现在做不了，能做的是哪一半」。\n'
+          + '⚠️ 附的时候**不要**在正文里重复那段 JSON。\n' },
           {
             role: 'user',
             content:
@@ -1222,9 +1240,104 @@ const server = Bun.serve({
               `\n现在他问：${q}`,
           },
         ]);
-        const r = appendMsg(cfg.dataDir, item.id, q, String(ans));
+        // ⚠️ 那段 ```spec 是**给机器看的**，不该出现在气泡里（用户要看的是"它打算做什么"）。
+        //    抠出来存进提案，正文是洗掉之后的那份。
+        const { spec, prose } = parseSpec(String(ans));
+        const r = appendMsg(cfg.dataDir, item.id, q, prose);
+        if (spec) patchProposal(cfg.dataDir, item.id, { spec });
         addActivity(db, { kind: 'feature', icon: '💬', title: `聊提案：${item.title}`, detail: q, ms: Date.now() - t0 });
+        return json({ ...r, spec });
+      }
+      // ⭐⭐⭐ 2026-10-13：「**最终能帮我做出来这个功能**」。
+      //   ⚠️⚠️ 判据**只有两个真数**：`docsAdded` / `chunksAdded`。
+      //       "模型说它做好了"不算，界面上的 ✅ 也不算。
+      //   ⚠️ 做不成就**如实说做不成** + 能做的是哪一半，不假装（这个项目最贵的一课）。
+      // ══════════════════════════════════════════════════════════════
+      //  ⭐⭐ 一起造一只新的 Pet（读者 2026-10-13）
+      //  「我给你一个链接你对话跟我然后我们一起制作好一个新的 pet」
+      //
+      //  ⚠️⚠️ 抠图**在浏览器里做**（canvas）—— 本机没有任何 PNG 编解码器。
+      //     这里只负责：列页面上的图 / 把图取成 data:URL / 存下抠好的结果。
+      //  ⚠️ 判据不是"生成了"，是**真的存下来了、而且主体占比正常**。
+      // ══════════════════════════════════════════════════════════════
+      if (p === '/api/pet/probe' && req.method === 'POST') {
+        const b = (await req.json().catch(() => ({}))) as { url?: string };
+        const url = String(b.url || '').trim();
+        if (!/^https?:\/\//i.test(url)) return json({ error: '给一个 http/https 的链接' }, 400);
+        const r = await probeUrl(url);
+        if (!r.ok) return json({ error: r.error }, 400);
         return json(r);
+      }
+      if (p === '/api/pet/fetch' && req.method === 'POST') {
+        const b = (await req.json().catch(() => ({}))) as { url?: string };
+        const r = await fetchImage(String(b.url || '').trim());
+        if (!r.ok) return json({ error: r.error }, 400);
+        return json(r);
+      }
+      if (p === '/api/pet/save' && req.method === 'POST') {
+        const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+        const r = savePet(cfg.dataDir, b as never);
+        if (!r.ok) return json({ error: r.error }, 400);
+        addActivity(db, { kind: 'feature', icon: '🌹', title: `做了一只新 Pet：${r.item.nm}`, detail: `主体占 ${(r.item.cover * 100).toFixed(0)}%` });
+        return json(r);
+      }
+      if (p === '/api/pet/remove' && req.method === 'POST') {
+        const b = (await req.json().catch(() => ({}))) as { id?: string };
+        const r = removePet(cfg.dataDir, String(b.id || ''));
+        if (!r.ok) return json({ error: r.error }, 400);
+        return json({ ok: true });
+      }
+      if (p === '/api/pet/forms') {
+        const reg = loadPets(cfg.dataDir);
+        return json({ items: reg.items.filter((x) => !reg.removed.includes(x.id)) });
+      }
+
+      if (p === '/api/features/make' && req.method === 'POST') {
+        const b = (await req.json().catch(() => ({}))) as { id?: string; spec?: SourceSpec; name?: string };
+        const item = b.id ? loadProposals(cfg.dataDir).items.find((x) => x.id === String(b.id)) : undefined;
+        // 名字：**用户填的那个优先**（他说叫什么就叫什么），其次提案存的，最后是 spec 里的
+        const name = String(b.name || item?.title || b.spec?.name || '新来源').trim().slice(0, 60);
+        const spec: SourceSpec | null = b.spec ?? item?.spec ?? null;
+        if (!spec) {
+          return json({ error: '这条还没有能执行的方案 —— 先跟它聊清楚「读哪里」，它会附一份可执行的定义' }, 400);
+        }
+        if (spec.kind === 'folder' && !spec.path) {
+          // ⚠️ 这个空**必须说清去哪儿填**，不然它就是一句"缺参数"（而这个项目的规矩是：
+          //    沉默的空 = 无法诊断）。
+          return json({ error: '它还不知道要读哪个目录。去「设置 → 这个软件能用你的什么」把那个文件夹授权给它，然后告诉我路径。' }, 400);
+        }
+        // ⚠️⚠️ `createEmbedder` 是**异步**的（我第一版写成同步调用，于是 `embedder` 拿到一个
+        //    Promise ⇒ `embedder.embed is not a function` ⇒ 整条路直接崩）。
+        //    而且这里要用**模块级缓存的那一个**（`embedder()`），不要再建一个：
+        //    每次新建都会重连一次 ollama，而它是个几百 MB 的模型。
+        let emb;
+        try { emb = await embedder(); } catch (e) {
+          return json({ error: '嵌入模型连不上（本机 ollama 起了吗）：' + String(e).slice(0, 120) }, 400);
+        }
+        const t0 = Date.now();
+        const res = await applySource({ ...spec, name }, db, emb, (m) => console.log(m));
+        if (!res.ok) {
+          addActivity(db, { kind: 'feature', icon: '⚠️', title: `没做成：${name}`, detail: res.error, ms: Date.now() - t0 });
+          return json({ error: res.error, ...res }, 400);
+        }
+        // ⭐ 真做成了才登记进侧栏 —— 先登记后索引的话，失败时侧栏会多一个点开是空的条目，
+        //    而"点开是空的"和"这个功能没做"长得一模一样。
+        const fid = `src-${res.space}`;
+        const cand = installCustom(cfg.dataDir, {
+          id: fid, name, view: 'search', spec,
+          hint: spec.kind === 'folder' ? `读 ${spec.path}` : `读 ${spec.url}`,
+        });
+        if (item) patchProposal(cfg.dataDir, item.id, {
+          state: 'installed', featureId: fid,
+          made: { docs: res.docsAdded, chunks: res.chunksAdded, scanned: res.scanned, truncated: res.truncated, space: res.space, at: new Date().toISOString() },
+        });
+        addActivity(db, { kind: 'feature', icon: '🚀', title: `做出来了：${name}`, detail: `${res.docsAdded} 篇`, ms: Date.now() - t0 });
+        return json({
+          ok: true, featureId: fid, feature: cand.feature, space: res.space,
+          docsAdded: res.docsAdded, chunksAdded: res.chunksAdded,
+          scanned: res.scanned, skipped: res.skipped, truncated: res.truncated, warnings: res.warnings,
+          ms: Date.now() - t0,
+        });
       }
       if (p === '/api/proposals/plan' && req.method === 'POST') {
         const b = (await req.json().catch(() => ({}))) as { id?: string };
@@ -1269,8 +1382,17 @@ const server = Bun.serve({
       //   ⚠️ 名字是**用户说了算**的：他写什么就是什么，不去"材料"里查。
       if (p.startsWith('/api/proposals/') && req.method === 'PATCH') {
         const id = decodeURIComponent(p.slice('/api/proposals/'.length));
-        const b = (await req.json().catch(() => ({}))) as { title?: string };
-        const r = patchProposal(cfg.dataDir, id, { title: String(b.title ?? '').trim().slice(0, 80) });
+        const b = (await req.json().catch(() => ({}))) as { title?: string; spec?: SourceSpec };
+        // ⚠️⚠️ **只应用"真给了的"字段。**
+        //    第一版是 `{ title: String(b.title ?? '').trim() }` ——
+        //    于是**任何不带 title 的 PATCH 都会把标题抹成空**，
+        //    而它**不报错、界面看起来也正常**（标题栏空着，用户只会以为是自己没起名字）。
+        //    我是发一条只带 `spec` 的请求时当场看见 `"title": ""` 才发现的。
+        const patch: { title?: string; spec?: SourceSpec } = {};
+        if (typeof b.title === 'string') patch.title = b.title.trim().slice(0, 80);
+        if (b.spec && typeof b.spec === 'object') patch.spec = b.spec;
+        if (!Object.keys(patch).length) return json({ error: '这条请求里没有要改的东西（title 或 spec）' }, 400);
+        const r = patchProposal(cfg.dataDir, id, patch);
         if (!r.ok) return json({ error: r.error }, 404);
         return json(r);
       }
@@ -1515,6 +1637,14 @@ ${sample}
       }
 
       // 静态文件：/out/* 和 /ui/*（光球模块、演示页、树图 html 都从这里走）
+      // ⭐ 用户自己造出来的 Pet 图。⚠️ 根是 **dataDir**（不是 cwd）——
+      //    它们是**用户的数据**，不是程序的一部分；装在包里的话，升级一次就全没了。
+      if (p.startsWith('/pets/')) {
+        const id = p.slice('/pets/'.length).replace(/[^a-zA-Z0-9._-]/g, '');
+        const f = join(expandHome(cfg.dataDir), 'pets', id);
+        if (existsSync(f) && f.startsWith(join(expandHome(cfg.dataDir), 'pets'))) return new Response(Bun.file(f));
+        return json({ error: '没有这张' }, 404);
+      }
       if (p.startsWith('/ui/') || p.startsWith('/out/')) {
         const rel = p.startsWith('/ui/') ? join('src', p.slice(1)) : p.slice(1);
         const f = join(process.cwd(), rel);

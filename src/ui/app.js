@@ -3978,17 +3978,43 @@ function renderKb() {
         .replace(/\*\*([^*\n]{1,80})\*\*/g, '<b>$1</b>')
         .replace(/`([^`\n]{1,60})`/g, '<code>$1</code>')
         .replace(/^\s*[-*]\s+/gm, '• ');
+      // 把一份 spec 摊成人话。**每一行都是"它要对你的电脑做的事"** ——
+      // 用户按之前必须看得懂，看不懂的"就这么做"就是让他闭眼签字。
+      const specLines = (sp, nm) => {
+        const li = (t) => '<li>' + esc(t) + '</li>';
+        const out = [];
+        if (sp.kind === 'folder') {
+          out.push(li('读这个文件夹：' + (sp.path || '（还不知道路径 —— 得先告诉它）')));
+          out.push(li('只收这些类型的文件：' + ((sp.exts && sp.exts.length) ? sp.exts.join(' / ') : 'md / txt / json / csv / 代码文件')));
+        } else if (sp.kind === 'url') {
+          out.push(li('抓这个网址：' + (sp.url || '（还不知道网址）')));
+        } else {
+          out.push(li('这一类现在还做不了：' + esc(String(sp.kind))));
+        }
+        out.push(li('索引成一个新来源「' + (nm || sp.name || '新来源') + '」'));
+        out.push(li('做完之后，在「搜索」里就能搜到它'));
+        return out.join('');
+      };
       const bubble = (who, text) =>
         '<div class="pb ' + (who === 'me' ? 'me' : 'it') + '"><div class="pbt">' +
           (who === 'me' ? esc(text) : mdLight(text)) + '</div></div>';
       // 一问一答 → 两条气泡（读者的：他给你对话、你给用户对话）
       const thread = (x) => (x.msgs || []).map((m) => bubble('me', m.q) + bubble('it', m.a)).join('');
 
+      // ⚠️ 老记录的标题里还留着字面 `**`（`先说结论：**AndroMeld 这个接不了`）——
+      //    那是 `titleOf` 修好**之前**存进去的，数据不会自己变干净。
+      //    ⇒ 渲染这一层再洗一次：新数据干净、旧数据也不难看。
+      const cleanTitle = (t) => String(t || '').replace(/[*`>]/g, '').replace(/^\s*先说结论\s*[：:]\s*/, '').trim();
+
       // ── 一个"方向"（还没选中的那条）：一排，点「就做它」 ──
       const propRow = (x) => {
         const one = String(x.plan || '').replace(/[#*`>\-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 78);
-        return '<div class="frow proprow" data-prop="' + esc(x.id) + '">' +
-          '<b style="flex:none">' + esc(x.title || '（没起名字）') + '</b>' +
+        // ⚠️⚠️ `data-app` 必须有 —— 筛选那一句是 `[data-prop]` 通吃的，
+        //    而行上没有这个属性时 `c.dataset.app` 是 `undefined`，
+        //    `undefined !== 'Terminal'` **永远成立** ⇒ 一选软件，方向行**全被隐藏**，
+        //    界面上就是"选完软件之后一个按键都没有"（读者 2026-10-13 的截图）。
+        return '<div class="frow proprow" data-prop="' + esc(x.id) + '" data-app="' + esc(x.app || '') + '">' +
+          '<b style="flex:none">' + esc(cleanTitle(x.title) || '（没起名字）') + '</b>' +
           '<span class="k" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(one) + '</span>' +
           '<button class="go sm" data-pick="' + esc(x.id) + '">就做它</button>' +
           '<button class="ghost sm" data-pdel="' + esc(x.id) + '">删</button></div>';
@@ -4006,7 +4032,7 @@ function renderKb() {
           '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">' +
             '<span class="badge">' + esc(badge) + '</span>' +
             (x.app ? '<span class="k">' + esc(x.app) + '</span>' : '') +
-            '<input data-pname="' + esc(x.id) + '" value="' + esc(x.title || '') + '" ' +
+            '<input data-pname="' + esc(x.id) + '" value="' + esc(cleanTitle(x.title)) + '" ' +
               'title="这个功能叫什么，你自己写 —— 写了就算数" ' +
               'style="flex:1;min-width:200px;font-weight:560;font-size:15px">' +
             '<button class="ghost sm" data-pdrop="1" title="回到那几个方向，重新挑一个">换一个功能制作</button>' +
@@ -4016,17 +4042,50 @@ function renderKb() {
             '<div class="pbody" style="white-space:pre-wrap;font-size:13px;margin-top:8px;max-height:300px;overflow:auto">' +
               esc(x.plan) + '</div></details>' +
           '<div class="pchat">' + said + '</div>' +
+          // ══════════════════════════════════════════════════════════════
+          // ⭐⭐⭐ 读者 2026-10-13：「**最终能帮我做出来这个功能**」。
+          //   ⚠️ 在这之前这一格只有「先出实现步骤」——**只出文字，什么都不落地**，
+          //      所以聊到底也做不出东西来。
+          //   ⇒ 现在模型在能表达的时候会附一份**可执行的定义**（`spec`），
+          //      这里把它**摊成人话**（读哪、读什么、变成什么），
+          //      再给一颗**真的会动手**的键。做完回的是**真条数**。
+          //   ⚠️ 摊开这一步不能省：用户按之前必须看得懂"它打算对我的电脑做什么"。
+          (x.spec ? '<div class="specbox">' +
+            '<div class="m" style="margin:0">它打算这么做</div>' +
+            '<ul class="speclist">' + specLines(x.spec, x.title) + '</ul>' +
+            '<div class="k">按「就这么做」，它会<b>真的</b>去读、去索引，然后把读到多少条报给你。</div>' +
+          '</div>' : '') +
           '<div class="row" style="margin-top:10px">' +
             '<input data-pq="' + esc(x.id) + '" placeholder="接着说 —— 它按你说的改（名字也算，你说叫什么就叫什么）">' +
             '<button class="go sm" data-pask="' + esc(x.id) + '">发送</button>' +
             (x.state === 'installed'
               ? '<button class="ghost sm" disabled>已装上</button>'
               : '<button class="ghost sm" data-pplan="' + esc(x.id) + '">先出实现步骤</button>') +
-            (m
-              ? '<button class="go sm" data-pinst="' + esc(x.id) + '" data-fid="' + esc(m.id) + '">安装「' + esc(m.name) + '」</button>'
-              : '<button class="ghost sm" disabled title="还没有对应的功能可以装 —— 先「先出实现步骤」">还没做</button>') +
+            (x.spec
+              // 有可执行的定义 ⇒ 这颗**真的动手**（不看目录里有没有现成的功能）
+              ? (x.state === 'installed'
+                  ? '<button class="go sm" data-premake="' + esc(x.id) + '" title="再读一遍（文件变了就重索引）">重新读一遍</button>'
+                  : '<button class="go sm" data-pmake="' + esc(x.id) + '">就这么做</button>')
+              // 没有 ⇒ 退回到老路：有对应的现成功能才给装，否则**如实说"还没做"**
+              : (m
+                  ? '<button class="go sm" data-pinst="' + esc(x.id) + '" data-fid="' + esc(m.id) + '">安装「' + esc(m.name) + '」</button>'
+                  : '<button class="ghost sm" disabled title="还没有可执行的做法 —— 在下面接着跟它聊，聊清楚「读哪里」，它就会给出一份">还没做</button>')) +
           '</div>' +
-          '<div class="k" style="margin-top:8px">聊到你觉得没问题了，就点上面那颗<b>安装</b>。</div>' +
+          '<div class="k" style="margin-top:8px" data-pres="' + esc(x.id) + '">' +
+            (x.made
+              // ⭐ 报**真数** —— 而且是**存下来的**那份（重画/重开都还在）
+              // ⚠️ 但 "新增 0 篇" 和 "一篇都没读到" **必须分开说**：
+              //    内容是没变的时候 `docsAdded` 就是 0（这是对的、也是省事的），
+              //    可界面上一句"读到 0 篇"读起来像"什么都没找到"。
+              ? (x.made.docs > 0
+                  ? '<b>做出来了。</b>新读到 ' + x.made.docs + ' 篇 · 这个来源现在共 ' + x.made.chunks + ' 段'
+                  : '<b>已经是最新的。</b>内容没变，这个来源还是 ' + x.made.chunks + ' 段') +
+                (x.made.truncated ? '（文件太多，到上限就停了）' : '') +
+                ' · 去左边「自己装的」里看看，或者直接在搜索里搜。'
+              : (x.state === 'installed'
+                ? '做出来了，去左边那一栏看看。'
+                : (x.spec ? '上面那几行就是它要做的全部；没问题就按那颗键。' : '接着跟它聊 —— 聊清楚「读哪里」，它就会给出一份可以执行的做法。'))) +
+          '</div>' +
         '</div>';
       };
 
@@ -4040,7 +4099,9 @@ function renderKb() {
             ? '<div class="k" style="margin-bottom:8px">还有 ' + others + ' 个方向，已经收起来了 —— 想换就点块里的「换一个功能制作」。</div>'
             : '') + propBlock(cur);
         }
-        return '<div class="k" style="margin-bottom:8px">它猜了几个方向，**先挑一个**：挑完就只剩它一个，其余收起来。</div>' +
+        // ⚠️ 这里原来是 `**先挑一个**` —— 写在 `<div>` 里就是**字面星号**（第三次踩了，
+        //    见 FACT 第 30 条）。要粗体就写 `<b>`，别指望 markdown。
+        return '<div class="k" style="margin-bottom:8px">它猜了几个方向，<b>先挑一个</b>：挑完就只剩它一个，其余收起来。</div>' +
           props.map(propRow).join('');
       };
 
@@ -4110,7 +4171,14 @@ function renderKb() {
           '<div id="sicmdout" class="k" style="margin-top:8px"></div></div>' +
         '<div class="card"><div class="m">它现在能看到什么</div>' + spaces +
           '<div class="k" style="margin-top:8px">' + s.docs + ' 段 · ' + s.chunks + ' 切块 · ' +
-          (s.hasLlm ? 'LLM 已配' : '⚠️ 还没配 LLM key（"让我想办法"用不了）') + '</div></div>' +
+          (s.hasLlm
+            ? 'LLM 已配'
+            // ⚠️⚠️ 只有一句「还没配」是不够的 —— 用户得知道**去哪儿填**。
+            //    而且这一条正是"打包版给别人的时候"唯一的入口：
+            //    包里**故意没有**任何人的 key（读者：「你打包的不能用有我的 api，要用户填写」），
+            //    所以第一次打开它一定是未配状态，这一颗键就是那条路。
+            : '⚠️ 还没配 LLM key —— <button class="ghost sm" id="sillm">去填我自己的 key</button>') +
+          '</div></div>' +
 
         '<div class="card"><div class="m">我电脑里的软件 · ' + apps.length + ' 个</div>' +
           '<div class="k">点一个，选中的软件下面就只列它能做的功能。标了「已接」的是已经有来源了。</div>' +
@@ -4125,7 +4193,12 @@ function renderKb() {
             '<b>安装</b>（真的加进侧栏）。⚠️ 「开始制作」只出步骤，不写代码 —— ' +
             '自动写代码再自动上线，失败时是静默的（页面照常、只是点开是空的）。</div>'
             : '<div class="k">还没有。上面选个软件让它想，或者在下面直接说。</div>') +
-          '<div style="margin-top:10px">' + propList() + '</div></div>' +
+          // ⚠️⚠️ 空态这一格**必须放在 propList() 外面**。
+          //    第一版我把它挂在 propList()「还没挑方向」那一支的尾巴上 ——
+          //    于是**已经挑过方向之后**再选别的软件（块被隐藏、一条都不剩），
+          //    这一格根本不存在 ⇒ 又是空白。是验证脚本的负向对照把它抓出来的。
+          '<div style="margin-top:10px">' + propList() +
+            '<div id="propend" class="k" style="margin-top:8px" hidden></div></div></div>' +
 
         // ── 主动式：打勾它才会主动来找你 ─────────────────────
         '<div class="card"><div class="m">主动式 · 让功能自己来找你 · ' + proCapable.length + ' 个可勾</div>' +
@@ -4171,6 +4244,17 @@ function renderKb() {
         //    ⚠️ 就地隐藏，**不重画** —— 重画会把筛选框里的字和滚动位置一起弄丢。
         const cards = $$('[data-prop]');
         cards.forEach((c) => { c.hidden = !!picked && c.dataset.app !== picked; });
+        // ⚠️⚠️ 只隐藏不交代 = 一格空白，而**空白和"没做"分不开**。
+        //    读者 2026-10-13：「我选中了一个软件，然后准备制作，但是没有任何按键让我继续」。
+        const anyOn = cards.some((c) => !c.hidden);
+        const pend = $('#propend');
+        if (pend) {
+          pend.hidden = !(picked && !anyOn);
+          if (picked && !anyOn) {
+            pend.innerHTML = '「<b>' + esc(picked) + '</b>」还没有想出功能来 —— ' +
+              '点<b>上面那颗「给选中的软件想功能」</b>，它就照这个软件给你猜几个方向。';
+          }
+        }
         const head = $('#prophead');
         if (head) {
           head.textContent = picked
@@ -4193,6 +4277,14 @@ function renderKb() {
         $$('.apick').forEach((r) => { r.hidden = !!q && !r.dataset.app.toLowerCase().includes(q); });
       };
       paintPick();
+
+      // 「去填我自己的 key」—— 打开设置抽屉、滚到 LLM 那一格。
+      // ⚠️ 别家是弹一个"请配置 API Key"的提示框 —— 那等于把用户丢在门口。
+      const ill = $('#sillm');
+      if (ill) ill.onclick = () => { openSettings(); setTimeout(() => {
+        const el = $('#drawer [data-k="apiKey"], #drawer input[type=password]');
+        if (el) { el.scrollIntoView({ block: 'center' }); el.focus(); }
+      }, 400); };
 
       const think = async (body, box) => {
         box.textContent = '在想…（要十几秒）';
@@ -4277,6 +4369,37 @@ function renderKb() {
           renderKb();                     // 兜底：找不到那一块（比如刚被删了）
         }
       }));
+      // ⭐⭐⭐ 「就这么做」——**真的做出来**。回的是真数，不是"已安装"三个字。
+      $$('[data-pmake], [data-premake]').forEach((b) => (b.onclick = async () => {
+        const id = b.dataset.pmake || b.dataset.premake;
+        const box = $('[data-pres="' + id + '"]');
+        const name = ($('[data-pname="' + id + '"]') || {}).value || '';
+        b.disabled = true; const was = b.textContent;
+        b.textContent = '在做…（走盘 + 嵌入，可能要一会儿）';
+        if (box) box.textContent = '在做 —— 真的在读那些文件、切块、嵌进库。';
+        const r = await post('/api/features/make', { id, name });
+        b.disabled = false; b.textContent = was;
+        if (r.error) {
+          // ⚠️ 失败**必须说清为什么** + 能做的是哪一半。只回一个红条 = 用户只能猜。
+          if (box) box.innerHTML = '<b>没做成：</b>' + esc(r.error) +
+            (r.scanned ? '（看了 ' + r.scanned + ' 个文件，跳过 ' + r.skipped + ' 个）' : '');
+          return toast(r.error, 'bad');
+        }
+        // ⚠️ 报的是**真数**。用户看得见"到底读到了没有"。
+        // ⚠️ 和上面那一行**同一套说法** —— 两处各写一套的话，
+        //    "新增 0 篇"在一处读作"没找到"、在另一处读作"没变化"。
+        const detail = (r.docsAdded > 0
+            ? '新读到 ' + r.docsAdded + ' 篇 · 现在共 ' + r.chunksAdded + ' 段'
+            : '已经是最新的，还是 ' + r.chunksAdded + ' 段') +
+          (r.truncated ? '（文件太多，到上限就停了）' : '') +
+          (r.warnings && r.warnings.length ? ' · 有 ' + r.warnings.length + ' 处读不了' : '') +
+          ' · 花了 ' + (r.ms / 1000).toFixed(1) + 's';
+        if (box) box.innerHTML = '<b>做出来了。</b>' + esc(detail) + ' 去左边「自己装的」里看看。';
+        toast('做出来了：' + detail);
+        await renderNav();
+        renderKb();
+      }));
+
       $$('[data-pplan]').forEach((b) => (b.onclick = async () => {
         b.disabled = true; b.textContent = '在想步骤…';
         const r = await post('/api/proposals/plan', { id: b.dataset.pplan });
@@ -4557,7 +4680,7 @@ async function openSettings() {
       '<div class="frow"><b style="flex:none">' + (on ? '连着 ' + on + ' 台' : '没连着') + '</b>' +
         '<span class="k" style="flex:1">' + esc(adb && adb.error ? adb.error : '手机插上并在开发者选项里允许这台电脑即可') + '</span>' +
         '<button class="ghost sm" data-capadb="1">重新检测</button></div>' +
-      '<div class="k" style="margin:14px 0 8px">下面这几样**只有你自己能在系统设置里开**（macOS 不允许 App 替你开）</div>' +
+      '<div class="k" style="margin:14px 0 8px">下面这几样<b>只有你自己能在系统设置里开</b>（macOS 不允许 App 替你开）</div>' +
       sysRow('完全磁盘访问', '要扫一些很深的系统目录时才需要', 'allfiles') +
       sysRow('辅助功能', '要驱动别的 App / 模拟按键时才需要', 'accessibility') +
       sysRow('蓝牙', '要连手环、体重秤这类设备时才需要', 'bluetooth');

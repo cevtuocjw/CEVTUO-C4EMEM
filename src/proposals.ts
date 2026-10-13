@@ -32,6 +32,20 @@ export interface Proposal {
   /** 方案正文 */
   plan: string;
   state: 'idea' | 'planned' | 'installed';
+  /**
+   * ⭐ 模型在对话里给出的**可执行定义**（读哪个目录/网址）。
+   * ⚠️ 它和 `plan` 是两回事：`plan` 是给人读的散文，这个是给机器执行的。
+   *    混成一个字段的话，"它说得多好"和"它真能做"就分不开了。
+   */
+  spec?: unknown;
+  /**
+   * ⭐ **做出来的结果**（真条数）。
+   * ⚠️ 它必须**存下来**：界面整块重画一次就没了的数字，等于没报 ——
+   *    我第一版把结果只写在那一行 DOM 上，`renderKb()` 一跑就变成
+   *    「做出来了，去左边那一栏看看」——**真数被冲掉了**，而"报真数"正是这件事的意义。
+   *    存下来之后，重开这一屏还能看见"上次读到 4 篇"。
+   */
+  made?: { docs: number; chunks: number; scanned: number; truncated: number; space: string; at: string };
   /** 真装上侧栏之后，记下装的是哪个功能 —— 卸载按钮要用它 */
   featureId?: string;
   msgs: ProposalMsg[];
@@ -88,15 +102,33 @@ export function addProposal(dataDir: string, p: { app?: string; plan: string; ti
   if (!plan) return { ok: false as const, error: '方案是空的' };
   const app = String(p.app ?? '').trim().slice(0, 60);
   const s = loadProposals(dataDir);
-  // ⚠️ 同一个软件、同一段方案**不要存两遍** —— 连点两次"想功能"会得到两条一样的，
-  //    而列表里看起来像"它给了两个一样的建议"。
-  if (s.items.some((x) => x.plan === plan && x.app === app)) {
-    return { ok: true as const, item: s.items.find((x) => x.plan === plan && x.app === app)!, dup: true };
+  const title = String(p.title ?? '').trim() || titleOf(plan, app);
+  // ⚠️⚠️ 去重的判据**要按"人眼看的那个字段"**（标题），不是"整条数据相等"。
+  //    只比 `plan` 实测**一条都拦不住**：模型每次生成的正文略有出入，
+  //    于是"再点一次想功能"就多一条，读者看到的是**三个几乎一样的窗口**
+  //    （`京麦能接，而且值得接。` × 3，正文后半段各不同）。
+  //    ⇒ ① 整段方案一模一样 ⇒ 重复；② **同一个软件 + 标题前 8 个字一样** ⇒ 也算重复。
+  // ⚠️⚠️ 但**必须先把软件名从标题头上摘掉**再比 —— 直接取"前 10 个字"是错的，
+  //    而它错得很像对的：`Clash Party 接不了。` 和 `Clash Party 能接，但只能接流量日志`
+  //    前 10 个字都是 `Clash Part` ⇒ **两条结论相反的被并成一条**。
+  //    软件名有几个字是不固定的（「京麦」2 个、「Clash Party」11 个），
+  //    所以"取前 N 个字"天生不稳。（这条是技能 `local-llm-chat` 自证时抓出来的。）
+  const bare = (t: string, a: string) => {
+    const s = String(t || '').replace(/\s+/g, ' ').trim();
+    return a && s.toLowerCase().startsWith(a.toLowerCase()) ? s.slice(a.length).trim() : s;
+  };
+  const keyOf = (t: string, a: string) => { const b = bare(t, a); return b.length >= 8 ? b.slice(0, 8) : b; };
+  const mine = keyOf(title, app);
+  const dupOf = (x: Proposal) =>
+    (x.plan === plan && x.app === app) ||
+    (x.app === app && mine.length >= 2 && keyOf(x.title, x.app) === mine);
+  if (s.items.some(dupOf)) {
+    return { ok: true as const, item: s.items.find(dupOf)!, dup: true };
   }
   const item: Proposal = {
     id: `p${Date.now().toString(36)}`,
     app,
-    title: String(p.title ?? '').trim() || titleOf(plan, app),
+    title,
     plan, state: 'idea', msgs: [],
     ts: new Date().toISOString(),
   };

@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CEVTUO Pet 设置</title>
+<!-- ⚠️ 这一页住在**设置窗**里（Swift 那个普通 NSWindow），不是桌面上那个透明小窗。
+     所以它**要**有底色 —— 透明那套只属于 pet.html。 -->
+<link rel="stylesheet" href="/ui/app.css">
+<style>
+  html,body{background:var(--paper,#f7f6f2);height:100%;margin:0;overflow:auto}
+  .wrap{max-width:720px;margin:0 auto;padding:22px 20px 60px}
+  h1{font-size:19px;margin:0 0 4px}
+  .sub{font-size:12.5px;color:var(--dim,#888);margin-bottom:18px;line-height:1.6}
+  .sec{margin-bottom:16px}
+  .sec > .m{margin-bottom:8px}
+  .opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(0,0,0,.10);
+       border-radius:10px;margin-bottom:8px;cursor:pointer}
+  .opt.on{border-color:#b9d92e;background:rgba(215,242,74,.16)}
+  .opt b{display:block;font-size:13.5px}
+  .opt .k{display:block;font-size:12px;color:var(--dim,#888);margin-top:2px;line-height:1.5}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+  .row label{flex:none;width:96px;font-size:12.5px;color:var(--dim,#777)}
+  .row input,.row select{flex:1;min-width:0}
+  .ok{color:#2f8a2f}.bad{color:#c0392b}
+  .pb{border-radius:12px;padding:8px 11px;margin:6px 0;max-width:88%;font-size:13px;line-height:1.6;white-space:pre-wrap}
+  .pb.me{background:#dff24a;margin-left:auto}
+  .pb.it{background:#fff;border:1px solid rgba(0,0,0,.08)}
+  #chat{max-height:260px;overflow:auto;padding:8px;border:1px solid rgba(0,0,0,.08);border-radius:10px;background:rgba(255,255,255,.6)}
+  .forms{display:flex;flex-wrap:wrap;gap:8px}
+  .fchip{display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;
+    border:1px solid rgba(0,0,0,.10);border-radius:12px;padding:10px 12px;min-width:92px;background:#fff}
+  .fchip.on{border-color:#b9d92e;background:rgba(215,242,74,.16)}
+  .fchip .box{width:56px;height:56px;display:grid;place-items:center;overflow:hidden;border-radius:8px}
+  .fchip .box img,.fchip .box video{max-width:100%;max-height:100%;object-fit:contain}
+  .fchip .nm{font-size:12.5px}
+  .fchip .kd{font-size:10.5px;color:var(--dim,#999)}
+  .mklist{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+  .mklist img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid rgba(0,0,0,.12);cursor:pointer}
+  .mklist img.on{border-color:#b9d92e;box-shadow:0 0 0 2px rgba(215,242,74,.5)}
+  .mkprev{display:flex;gap:14px;align-items:center;margin:10px 0}
+  .mkprev figure{margin:0;text-align:center}
+  .mkprev .fr{width:150px;height:150px;display:grid;place-items:center;border-radius:12px;overflow:hidden}
+  .mkprev .fr.a{background:#fff;border:1px solid rgba(0,0,0,.10)}
+  .mkprev .fr.b{background:#1b1a1f}
+  .mkprev img{max-width:100%;max-height:100%;object-fit:contain}
+  .mkprev figcaption{font-size:11.5px;color:var(--dim,#999);margin-top:5px}
+  .specbox{border:1px solid rgba(0,0,0,.10);background:rgba(215,242,74,.12);border-radius:10px;padding:10px 12px;margin-top:8px;font-size:13px}
+  .speclist{margin:6px 0 0;padding-left:18px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>CEVTUO Pet</h1>
+  <div class="sub">桌面上那个小家伙的设置。<b>它和 cevtuo-c4emem 共用同一个引擎</b> —— 所以这里聊出来的东西，在 c4emem 里也在。</div>
+
+  <!-- ── 模式 ── -->
+  <div class="card sec">
+    <div class="m">它是什么</div>
+    <label class="opt" id="m-multi"><input type="radio" name="mode" value="multi">
+      <span><b>多 APP</b><span class="k">鼠标放上去展开一整圈：左边是<b>正在运行的软件</b>，点一个就把它叫到前面。<br>
+      右键 = <b>完整的那个清单</b>（勾选、批量退出）。</span></span></label>
+    <label class="opt" id="m-single"><input type="radio" name="mode" value="single">
+      <span><b>单个 APP</b><span class="k">它就只认一个软件 —— 点一下直接切换过去，不展开那一圈。<br>
+      适合"我一天就盯着一个东西用"。</span></span></label>
+    <div id="singlepick" style="display:none">
+      <div class="row"><label>是哪个</label>
+        <select id="sapp"></select></div>
+    </div>
+  </div>
+
+  <!-- ── 形态 ── -->
+  <div class="card sec">
+    <div class="m">它长什么样</div>
+    <div class="k" style="margin-bottom:8px">点一个就换。⚠️ 带「图」那个字的是<b>静态图</b> —— 它不会转。</div>
+    <div id="forms" class="forms"></div>
+    <div class="row" style="margin-top:12px">
+      <label>转不转</label>
+      <input type="checkbox" id="spinOn">
+      <span class="k">关掉它就定住不动（<b>默认是转的</b>）。2D 那几种我给它叠了厚度，
+        转起来像有厚度的东西；不叠的话侧过去就是一张纸。</span>
+    </div>
+  </div>
+
+  <!-- ── 模型 ── -->
+  <div class="card sec">
+    <div class="m">模型 · 你自己的 key</div>
+    <div class="k" style="margin-bottom:8px">⚠️ 这个软件<b>不带</b>任何人的 key。填你自己的 ——
+      存在本机 <code>~/.c4emem/settings.json</code>，不会发给别人。</div>
+    <div class="row"><label>接口地址</label><input id="baseUrl" placeholder="https://api.deepseek.com/v1"></div>
+    <div class="row"><label>模型名</label><input id="model" placeholder="deepseek-chat"></div>
+    <div class="row"><label>API Key</label><input id="apiKey" type="password" placeholder="sk-…"></div>
+    <div class="row"><label></label><button class="go" id="saveapi">保存并试一下</button>
+      <span id="apimsg" class="k"></span></div>
+  </div>
+
+  <!-- ── 常驻 ── -->
+  <div class="card sec">
+    <div class="m">它在哪儿待着</div>
+    <div class="k" style="margin-bottom:8px">⭐ <b>至少留一个</b> —— 两个都关掉的话，就再没有入口能把它叫回来了。</div>
+    <div class="row"><label>菜单栏</label>
+      <input type="checkbox" id="prefMenu"><span class="k">右上角那颗小图标（点它有菜单：显示/隐藏、设置、退出）</span></div>
+    <div class="row"><label>Dock</label>
+      <input type="checkbox" id="prefDock"><span class="k">Dock 里那个图标</span></div>
+    <div class="k" id="prefmsg"></div>
+  </div>
+
+  <!-- ── 一起造一只新的 ── -->
+  <div class="card sec">
+    <div class="m">一起造一只新的</div>
+    <div class="k" style="margin-bottom:8px">给它一张图（本地上传，或者给个网页链接让我把里面的图列出来），
+      我把它<b>抠成没有背景的</b>，然后它就变成你可以随时切过去的一个形态。</div>
+    <div class="row"><label>本地上传</label><input type="file" id="mkfile" accept="image/*"></div>
+    <div class="row"><label>或给个链接</label><input id="mkurl" placeholder="https://…（我会列出这个页面上所有的图）">
+      <button class="ghost" id="mkprobe">看看有什么</button></div>
+    <div id="mklist" class="mklist"></div>
+    <div id="mkprev" class="mkprev"></div>
+    <div class="row" id="mkname" style="display:none"><label>它叫什么</label>
+      <input id="mknamein" placeholder="比如：银玫瑰"><button class="go" id="mksave">做出来，装上去</button></div>
+    <div class="k" id="mkmsg"></div>
+  </div>
+
+  <!-- ── 跟它说 ── -->
+  <div class="card sec">
+    <div class="m">跟它说 · 让它帮你做个东西</div>
+    <div class="k" style="margin-bottom:8px">像跟人说话那样。聊清楚"要读哪里、做成什么样"，
+      它会给你一份可执行的做法 —— 按一下<b>真的做出来</b>（读真的文件、进真的库、报真的条数）。</div>
+    <div id="chat"></div>
+    <div class="row" style="margin-top:8px">
+      <input id="q" placeholder="比如：把我 OneDrive 那个文件夹做成一个来源，叫 zronedrive">
+      <button class="go" id="send">发送</button>
+    </div>
+    <div id="specslot"></div>
+    <div class="k" id="makemsg"></div>
+  </div>
+
+  <div class="k" style="text-align:center;margin-top:22px">日志：<code>~/.c4emem/pet.log</code> · 核心：<code>~/.c4emem/core.log</code></div>
+</div>
+
+<script type="module">
+const $ = (s) => document.querySelector(s);
+const api = (p, o) => fetch(p, o).then((r) => r.json());
+const post = (p, b) => api(p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b ?? {}) });
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const mdLight = (t) => esc(t).replace(/\*\*([^*\n]{1,80})\*\*/g, '<b>$1</b>').replace(/`([^`\n]{1,60})`/g, '<code>$1</code>');
+const bubble = (who, t) => '<div class="pb ' + (who === 'me' ? 'me' : 'it') + '">' + (who === 'me' ? esc(t) : mdLight(t)) + '</div>';
+
+// ── 模式（存在 localStorage，pet.js 读同一个键）──────────────────
+const MODE_KEY = 'pet.mode', SINGLE_KEY = 'pet.singlePath';
+let mode = localStorage.getItem(MODE_KEY) || 'multi';
+const paintMode = () => {
+  $('#m-multi').classList.toggle('on', mode === 'multi');
+  $('#m-single').classList.toggle('on', mode === 'single');
+  $('#m-multi').querySelector('input').checked = mode === 'multi';
+  $('#m-single').querySelector('input').checked = mode === 'single';
+  $('#singlepick').style.display = mode === 'single' ? '' : 'none';
+};
+document.querySelectorAll('input[name=mode]').forEach((r) => (r.onchange = () => {
+  mode = r.value; localStorage.setItem(MODE_KEY, mode); paintMode();
+}));
+$('#sapp').onchange = () => localStorage.setItem(SINGLE_KEY, $('#sapp').value);
+paintMode();
+
+// ── 软件列表（单个 APP 那个下拉）──────────────────────────────
+api('/api/apps').then((a) => {
+  const apps = (a.apps || []).slice().sort((x, y) => x.name.localeCompare(y.name));
+  $('#sapp').innerHTML = apps.map((x) =>
+    '<option value="' + esc(x.path) + '">' + esc(x.name) + '</option>').join('');
+  $('#sapp').value = localStorage.getItem(SINGLE_KEY) || '';
+}).catch(() => { $('#sapp').innerHTML = '<option value="">（读不到软件列表）</option>'; });
+
+// ── 形态（和 pet.js **共用同一份名单**）────────────────────────
+// ⚠️ 名单住在 `/ui/petforms.js`，两边都 import 它 —— 各写一份必然漂移，
+//    而漂移的症状是「这里能选、选了 Pet 变空白」，且一个错都不报。
+import { PET_FORMS } from '/ui/petforms.js';
+const FORM_KEY = 'c4emem.pet';
+const petPref = () => { try { return JSON.parse(localStorage.getItem(FORM_KEY) || '{}'); } catch { return {}; } };
+const petSave = (p) => localStorage.setItem(FORM_KEY, JSON.stringify({ ...petPref(), ...p }));
+let curForm = petPref().form || 'card';
+let madePets = [];
+/**
+ * ⚠️ 形态列表 = **内置的 + 用户自己造的**。
+ *    第一版只画了内置那 6 个 ⇒ 用户做完一只新的，**上面的列表里看不到它** ——
+ *    表现是「做好了，但没法选它」，而会话里刚说了一句"做好了"（自相矛盾）。
+ */
+function allForms() {
+  return [...PET_FORMS, ...madePets.map((x) => ({ id: 'u-' + x.id, nm: x.nm, kind: 'static', img: '/pets/' + x.id + '.png', made: x }))];
+}
+async function loadForms() {
+  const r = await api('/api/pet/forms').catch(() => ({ items: [] }));
+  madePets = r.items || [];
+  paintFormChips();
+}
+function paintFormChips() {
+  $('#forms').innerHTML = allForms().map((f) => {
+    const inner = f.kind === 'static' ? '<img src="' + f.img + '" alt="">'
+      : f.kind === 'card' ? '<img src="/ui/assets/card.png" alt="">'
+        : f.keyed ? '<img src="/ui/assets/mineral-' + f.id + '-mini.webp" alt="">'
+          : '<video src="' + f.video + '" muted loop autoplay playsinline preload="metadata"></video>';
+    return '<div class="fchip" data-id="' + f.id + '"><div class="box">' + inner + '</div>' +
+      '<span class="nm">' + f.nm + '</span>' +
+      '<span class="kd">' + (f.made ? '你造的' : f.kind === 'static' ? '图 · 不转' : f.kind === 'card' ? '卡片' : '动的') + '</span>' +
+      (f.made ? '<button class="ghost sm" data-del="' + f.made.id + '">删</button>' : '') + '</div>';
+  }).join('');
+  document.querySelectorAll('.fchip').forEach((c) => (c.onclick = (e) => {
+    if (e.target.closest('[data-del]')) return;      // ⚠️ 点「删」别把它当成"选中"
+    curForm = c.dataset.id;
+    petSave({ form: curForm });
+    paintForms();
+    bridge({ cmd: 'reloadPet' });
+  }));
+  document.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async (e) => {
+    e.stopPropagation();
+    const r = await post('/api/pet/remove', { id: b.dataset.del });
+    if (r.error) return ($('#mkmsg').innerHTML = '<span class="bad">' + esc(r.error) + '</span>');
+    if (curForm === 'u-' + b.dataset.del) { curForm = 'card'; petSave({ form: 'card' }); bridge({ cmd: 'reloadPet' }); }
+    await loadForms(); paintForms();
+  }));
+  paintForms();
+}
+/** ⚠️ 默认**转** —— 只有明确存了 false 才不转（否则"没设置过"会被当成"关"）。 */
+function paintSpin() { $('#spinOn').checked = petPref().spin !== false; }
+function paintForms() {
+  document.querySelectorAll('.fchip').forEach((c) => c.classList.toggle('on', c.dataset.id === curForm));
+  const f = PET_FORMS.find((x) => x.id === curForm);
+  const nm = document.querySelector('#formnow');
+  if (nm && f) nm.textContent = f.nm;
+}
+await loadForms();
+paintSpin();
+
+// ── 模型 ─────────────────────────────────────────────────────
+api('/api/settings').then((s) => {
+  const v = s.values || {};
+  $('#baseUrl').value = v.llm?.baseUrl || '';
+  $('#model').value = v.llm?.model || '';
+  if (!s.connected?.llm) $('#apimsg').innerHTML = '<span class="bad">还没配 —— 填完按右边那颗</span>';
+});
+$('#saveapi').onclick = async () => {
+  $('#apimsg').textContent = '在试…';
+  const r = await post('/api/settings', { llm: { baseUrl: $('#baseUrl').value.trim(), model: $('#model').value.trim(), apiKey: $('#apiKey').value.trim() } });
+  if (r.error) return ($('#apimsg').innerHTML = '<span class="bad">' + esc(r.error) + '</span>');
+  $('#apimsg').innerHTML = r.connected?.llm
+    ? '<span class="ok">✓ 通了</span>'
+    // ⚠️ 只说"没通"是没用的 —— 得说清**去哪儿看**
+    : '<span class="bad">还是没通 —— 检查地址/模型名/Key，或者看 ~/.c4emem/core.log</span>';
+};
+
+// ── 常驻（走原生桥；没有桥就退化成只存 localStorage）──────────
+const bridge = (o) => {
+  const h = window.webkit?.messageHandlers?.c4;
+  if (h) { h.postMessage(o); return true; }
+  return false;   // ⚠️ 在浏览器里打开这一页时没有桥 —— 要如实退化，不能假装设置生效了
+};
+window.__petPrefs = (p) => {
+  $('#prefMenu').checked = !!p.menu;
+  $('#prefDock').checked = !!p.dock;
+  if (p.why) $('#prefmsg').innerHTML = '<span class="bad">' + esc(p.why) + '</span>';
+  else $('#prefmsg').textContent = p.ok === false ? '' : '已保存。' + (p.dock ? '' : '（没有 Dock 图标，用菜单栏那颗）');
+};
+if (!bridge({ cmd: 'prefs_get' })) {
+  $('#prefmsg').innerHTML = '<span class="bad">现在不在 App 里（浏览器打开的），这两个开关存不了 —— 在 App 里打开这一页才行。</span>';
+  $('#prefMenu').disabled = $('#prefDock').disabled = true;
+}
+const savePrefs = () => bridge({ cmd: 'prefs', dock: $('#prefDock').checked, menu: $('#prefMenu').checked });
+$('#prefMenu').onchange = savePrefs;
+$('#prefDock').onchange = savePrefs;
+
+// ── 一起造一只新的 ───────────────────────────────────────────
+//
+// ⚠️⚠️ 抠图**只能在这里做**（canvas）：本机没有任何 PNG 编解码器
+//    （pngjs / sharp / jimp 都没有），服务端算不出来。
+// ⚠️ 而且**跨域图不能直接喂 canvas** —— 会污染画布、`getImageData` 抛 SecurityError。
+//    所以远程图一律先让服务端取回来、转成 `data:` URL 再喂（`data:` 不污染）。
+let mkSrc = null;      // { dataUrl, from }
+let mkCut = null;      // { dataUrl, w, h, cover }
+let mkDims = null;
+
+/** 抠底：从四条边泛洪 + 只留最大连通域 + 羽化。算法与 `app/pet/cut-pet.mjs` 同一套。 */
+async function keyOut(dataUrl, SIZE = 512, PAD = 0.07) {
+  const img = new Image();
+  img.src = dataUrl;
+  await img.decode();
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, w, h);
+  const px = d.data;
+  const at = (x, y) => { const i = (y * w + x) * 4; return [px[i], px[i+1], px[i+2]]; };
+  const cs = [at(2,2), at(w-3,2), at(2,h-3), at(w-3,h-3)];
+  const med = (k) => { const a = cs.map(v => v[k]).sort((x,y)=>x-y); return a[1]; };
+  const bg = [med(0), med(1), med(2)];
+  const HARD = 42, SOFT = 62;
+  const dist = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    dist[y*w+x] = Math.min(255, Math.max(Math.abs(px[i]-bg[0]), Math.abs(px[i+1]-bg[1]), Math.abs(px[i+2]-bg[2])));
+  }
+  const isBg = new Uint8Array(w * h);
+  const st = [];
+  for (let x = 0; x < w; x++) st.push(x, 0, x, h - 1);
+  for (let y = 0; y < h; y++) st.push(0, y, w - 1, y);
+  const PUSH = (x, y) => { const k = y*w+x; if (!isBg[k] && dist[k] < SOFT) { isBg[k] = 1; st.push(x, y); } };
+  while (st.length) {
+    const y = st.pop(), x = st.pop(), k = y*w+x;
+    if (dist[k] < HARD) isBg[k] = 1;
+    if (x > 0) PUSH(x-1, y); if (x < w-1) PUSH(x+1, y);
+    if (y > 0) PUSH(x, y-1); if (y < h-1) PUSH(x, y+1);
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const k = y*w+x, i = k*4;
+    if (isBg[k]) { px[i+3] = 0; continue; }
+    const edge = (x > 0 && isBg[k-1]) || (x < w-1 && isBg[k+1]) || (y > 0 && isBg[k-w]) || (y < h-1 && isBg[k+w]);
+    px[i+3] = edge ? Math.max(40, Math.min(255, dist[k] * 8)) : 255;
+  }
+  g.putImageData(d, 0, 0);
+  // 只留最大的那块连通域（水印、孤立残影会**把包围盒撑到整张图**）
+  const solid = new Uint8Array(w*h);
+  for (let k = 0; k < w*h; k++) solid[k] = px[k*4+3] >= 140 ? 1 : 0;
+  const seen = new Uint8Array(w*h); let best = null; const st2 = [];
+  for (let s0 = 0; s0 < w*h; s0++) {
+    if (!solid[s0] || seen[s0]) continue;
+    let n = 0, bx0 = w, by0 = h, bx1 = 0, by1 = 0; st2.push(s0); seen[s0] = 1;
+    while (st2.length) {
+      const k = st2.pop(); n++;
+      const x = k % w, y = (k - x) / w;
+      if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
+      if (y < by0) by0 = y; if (y > by1) by1 = y;
+      if (x > 0 && solid[k-1] && !seen[k-1]) { seen[k-1] = 1; st2.push(k-1); }
+      if (x < w-1 && solid[k+1] && !seen[k+1]) { seen[k+1] = 1; st2.push(k+1); }
+      if (y > 0 && solid[k-w] && !seen[k-w]) { seen[k-w] = 1; st2.push(k-w); }
+      if (y < h-1 && solid[k+w] && !seen[k+w]) { seen[k+w] = 1; st2.push(k+w); }
+    }
+    if (!best || n > best.n) best = { n, bx0, by0, bx1, by1 };
+  }
+  if (!best) throw new Error('抠完之后一个像素都不剩 —— 这张图可能本来就是纯色底');
+  for (let k = 0; k < w*h; k++) if (solid[k] && !seen[k]) px[k*4+3] = 0;
+  g.putImageData(d, 0, 0);
+  const bw = best.bx1 - best.bx0 + 1, bh = best.by1 - best.by0 + 1;
+  const inner = SIZE * (1 - PAD * 2);
+  const k2 = Math.min(inner / bw, inner / bh);
+  const dw = Math.round(bw * k2), dh = Math.round(bh * k2);
+  const o = document.createElement('canvas'); o.width = SIZE; o.height = SIZE;
+  const og = o.getContext('2d'); og.imageSmoothingQuality = 'high';
+  og.drawImage(c, best.bx0, best.by0, bw, bh, Math.round((SIZE-dw)/2), Math.round((SIZE-dh)/2), dw, dh);
+  const od = og.getImageData(0, 0, SIZE, SIZE).data;
+  let solidN = 0;
+  for (let i = 3; i < od.length; i += 4) if (od[i] > 24) solidN++;
+  const cover = solidN / (SIZE*SIZE);
+  // ⚠️ 抠过头要**当场说**：只剩一点点 = 背景色选错了或这是一张纯色图
+  if (cover < 0.02) throw new Error('抠出来几乎是空的（主体只占 ' + (cover*100).toFixed(1) + '%）—— 这张图可能本来就没什么主体');
+  return { dataUrl: o.toDataURL('image/png'), w: SIZE, h: SIZE, cover };
+}
+
+async function showPreview() {
+  const box = $('#mkprev');
+  box.innerHTML = '<figure><div class="fr a"><img src="' + mkSrc.dataUrl + '"></div><figcaption>原图</figcaption></figure>' +
+    '<span style="font-size:20px;color:#aaa">→</span>' +
+    '<figure><div class="fr b"><img src="' + mkCut.dataUrl + '"></div>' +
+    '<figcaption>抠好了 · 主体占 ' + (mkCut.cover*100).toFixed(0) + '%</figcaption></figure>';
+  $('#mkname').style.display = '';
+}
+
+async function takeImage(dataUrl, from) {
+  $('#mkmsg').textContent = '在抠底…';
+  try {
+    mkSrc = { dataUrl, from };
+    mkCut = await keyOut(dataUrl);
+    mkDims = [mkCut.w, mkCut.h];
+    await showPreview();
+    $('#mkmsg').innerHTML = '<span class="ok">抠好了。</span>给它起个名字，然后按「做出来」——' +
+      '它会出现在上面的「它长什么样」里，也出现在桌面上那个 Pet 上。';
+  } catch (e) {
+    $('#mkmsg').innerHTML = '<span class="bad">抠不了：' + esc(e.message) + '</span>';
+  }
+}
+
+$('#mkfile').onchange = (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => takeImage(String(rd.result), '本地上传：' + f.name);
+  rd.readAsDataURL(f);
+};
+
+$('#mkprobe').onclick = async () => {
+  const url = $('#mkurl').value.trim();
+  if (!url) return;
+  $('#mkmsg').textContent = '在看那个页面…';
+  const r = await post('/api/pet/probe', { url });
+  if (r.error) { $('#mkmsg').innerHTML = '<span class="bad">' + esc(r.error) + '</span>'; return; }
+  // ⚠️ 一张都没有时要**说清为什么**（页面不执行 JS ⇒ 纯前端渲染的站会列得很空），
+  //    不能丢一个空白区域让人猜。
+  if (!r.items.length) {
+    $('#mklist').innerHTML = '';
+    $('#mkmsg').innerHTML = '<span class="bad">这个页面里一张图都没找到。</span>' +
+      '（它多半是<b>前端渲染</b>的 —— 我只读 HTML，不跑页面的 JS。换个直接给出图片地址的链接试试。）';
+    return;
+  }
+  $('#mkmsg').textContent = '找到 ' + r.items.length + ' 个，点一个：';
+  $('#mklist').innerHTML = r.items.slice(0, 40).map((x, i) =>
+    '<img data-i="' + i + '" src="' + esc(x.url) + '" title="' + esc(x.kind) + '" ' +
+    'onerror="this.style.opacity=.25" alt="">').join('');
+  $('#mklist').querySelectorAll('img').forEach((el) => (el.onclick = async () => {
+    $('#mklist').querySelectorAll('img').forEach((y) => y.classList.remove('on'));
+    el.classList.add('on');
+    $('#mkmsg').textContent = '在把它取回来…';
+    const f = await post('/api/pet/fetch', { url: r.items[Number(el.dataset.i)].url });
+    if (f.error) { $('#mkmsg').innerHTML = '<span class="bad">' + esc(f.error) + '</span>'; return; }
+    await takeImage(f.dataUrl, '链接：' + r.items[Number(el.dataset.i)].url);
+  }));
+};
+
+$('#spinOn').onchange = () => {
+  petSave({ spin: $('#spinOn').checked });
+  bridge({ cmd: 'reloadPet' });
+  $('#mkmsg').textContent = $('#spinOn').checked ? '它会转。' : '定住了。';
+};
+
+$('#mksave').onclick = async () => {
+  if (!mkCut) return;
+  const name = $('#mknamein').value.trim();
+  if (!name) { $('#mkmsg').innerHTML = '<span class="bad">先给它起个名字</span>'; return; }
+  $('#mkmsg').textContent = '在装上…';
+  const r = await post('/api/pet/save', { name, dataUrl: mkCut.dataUrl, cover: mkCut.cover, w: mkCut.w, h: mkCut.h, from: mkSrc.from });
+  if (r.error) { $('#mkmsg').innerHTML = '<span class="bad">' + esc(r.error) + '</span>'; return; }
+  $('#mkmsg').innerHTML = '<span class="ok">做好了：「' + esc(r.item.nm) + '」。</span>' +
+    '去上面「它长什么样」里点它，桌面上那个就会换过去。';
+  mkCut = null; $('#mkname').style.display = 'none'; $('#mkprev').innerHTML = '';
+  $('#mklist').innerHTML = ''; $('#mknamein').value = '';
+  await loadForms();
+};
+
+// ── 跟它说 ───────────────────────────────────────────────────
+let propId = null, spec = null;
+const chatBox = $('#chat');
+chatBox.insertAdjacentHTML('beforeend', bubble('it',
+  '说一句你想要的东西。比如「把我 OneDrive 那个文件夹做成一个来源」。\n' +
+  '⚠️ 现在我能**真的做出来**的是两种：**读一个本地文件夹**、**读一个网址**。'));
+
+function paintSpec() {
+  const slot = $('#specslot');
+  if (!spec) { slot.innerHTML = ''; return; }
+  const li = (t) => '<li>' + esc(t) + '</li>';
+  slot.innerHTML = '<div class="specbox"><div class="m" style="margin:0">它打算这么做</div><ul class="speclist">' +
+    (spec.kind === 'folder'
+      ? li('读这个文件夹：' + (spec.path || '（还不知道路径）')) +
+        li('只收这些类型的文件：' + ((spec.exts && spec.exts.length) ? spec.exts.join(' / ') : 'md / txt / json / csv / 代码文件'))
+      : li('抓这个网址：' + (spec.url || '（还不知道网址）'))) +
+    li('索引成一个新来源「' + esc(spec.name || '新来源') + '」') +
+    '</ul><div class="row" style="margin-top:8px"><button class="go" id="makedo">就这么做</button>' +
+    '<span class="k">按下去它会真去读、真去索引，然后把读到多少条报给你。</span></div></div>';
+  $('#makedo').onclick = async () => {
+    const b = $('#makedo'); b.disabled = true; b.textContent = '在做…';
+    const r = await post('/api/features/make', { id: propId, spec, name: spec.name });
+    b.disabled = false; b.textContent = '就这么做';
+    // ⚠️ 报的是**真数**。没做成要说清为什么、能做的是哪一半。
+    $('#makemsg').innerHTML = r.error
+      ? '<span class="bad">没做成：' + esc(r.error) + '</span>'
+      : '<span class="ok">做出来了：' + (r.docsAdded > 0
+          ? '新读到 ' + r.docsAdded + ' 篇 · 现在共 ' + r.chunksAdded + ' 段'
+          : '已经是最新的，还是 ' + r.chunksAdded + ' 段') + '</span> · 在「搜索」里搜得到';
+  };
+}
+
+$('#send').onclick = async () => {
+  const q = $('#q').value.trim();
+  if (!q) return;
+  $('#q').value = '';
+  chatBox.insertAdjacentHTML('beforeend', bubble('me', q));
+  chatBox.scrollTop = chatBox.scrollHeight;
+  const b = $('#send'); b.disabled = true; b.textContent = '…';
+  // 第一条：先让它给方向；之后就是在这条提案上接着聊
+  const r = propId
+    ? await post('/api/proposals/chat', { id: propId, q })
+    : await post('/api/features/propose', { wish: q });
+  b.disabled = false; b.textContent = '发送';
+  if (r.error) {
+    chatBox.insertAdjacentHTML('beforeend', bubble('it', '做不了：' + r.error + '\n（多半是还没填 API key —— 上面那一格）'));
+    return;
+  }
+  const items = r.items || [];
+  if (!propId && items.length) {
+    // 把方案正文当第一条回答；spec 可能已经在这条里了
+    propId = items[0].id;
+    spec = items[0].spec || null;
+    chatBox.insertAdjacentHTML('beforeend', bubble('it', items[0].plan || '（它没写出方案）'));
+    if (items.length > 1) {
+      chatBox.insertAdjacentHTML('beforeend', bubble('it',
+        '（它还猜了另外 ' + (items.length - 1) + ' 个方向，在 c4emem 的「自我改进」里能看到。）'));
+    }
+  } else {
+    const msgs = (r.item && r.item.msgs) || [];
+    const ans = msgs.length ? msgs[msgs.length - 1].a : '（没答上）';
+    chatBox.insertAdjacentHTML('beforeend', bubble('it', ans));
+    if (r.spec) spec = r.spec;
+  }
+  chatBox.scrollTop = chatBox.scrollHeight;
+  paintSpec();
+};
+$('#q').onkeydown = (e) => { if (e.key === 'Enter') $('#send').click(); };
+</script>
+</body>
+</html>

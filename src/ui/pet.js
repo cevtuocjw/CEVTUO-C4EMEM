@@ -59,20 +59,9 @@ const petPref = () => { try { return JSON.parse(localStorage.getItem(PET_KEY) ||
 const petSave = (p) => localStorage.setItem(PET_KEY, JSON.stringify({ ...petPref(), ...p }));
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const PET_FORMS = [
-  { id: 'card', nm: 'CEVTUO 卡片' },
-  { id: 'pearl', nm: '珍珠' },
-  { id: 'silver', nm: '银' },
-  { id: 'lead', nm: '铅' },
-  { id: 'zinc', nm: '锌' },
-];
-const ORB_VIDEO = {
-  pearl: '/ui/assets/pearl-orb.mp4',
-  silver: '/ui/assets/mineral-silver-loop.mp4',
-  lead: '/ui/assets/mineral-lead-loop.mp4',
-  zinc: '/ui/assets/mineral-zinc-loop.mp4',
-};
-const ORB_KEYED = { silver: 1, lead: 1, zinc: 1 };
+// ⚠️ 名单**搬到 `petforms.js`** 了 —— 设置页也要它，两份必然漂移，
+//    而漂移的症状是「设置里选了、Pet 变空白」且**一个错都不报**。
+import { PET_FORMS, formOf } from './petforms.js';
 /** ⚠️ 和主界面那份**必须一样**（两份名单漂移的症状是"Pet 换到某个形态就空白"） */
 const CARD_LAYERS = 18;
 
@@ -89,15 +78,59 @@ function buildCard(el) {
   el.innerHTML = html;
 }
 
+/**
+ * ⭐ 给一张 **2D 图**做"厚度"：同一张图叠 N 层、往 Z 错开。
+ *
+ * 读者 2026-10-13：「我希望如果是 2D 的你能够**给它一点厚度让它旋转**」
+ * ⚠️ 不叠层的话，转起来就是**一张纸侧过去**（转到 90° 直接消失），
+ *    看起来像"坏了"，而不是"它在转身"。
+ * ⚠️ 层数不能太多：每层都是一次合成，48 个面那种教训就在 FACT 里
+ *    （折射玻璃 48 面 ⇒ 从 60fps 掉到 4.7fps）。16 层在这个尺寸下没压力。
+ */
+const SLAB_LAYERS = 16;
+function buildSlab(el, src) {
+  if (!el) return;
+  let html = '';
+  for (let i = 0; i < SLAB_LAYERS; i += 1) {
+    const z = -2.6 + (5.2 * i) / (SLAB_LAYERS - 1);
+    // ⚠️ 压暗系数**别给大** —— 16 层叠起来，边上那几层一暗，整体就发灰，
+    //    看起来像换了个材质而不是原来的图有了厚度。实测 0.45 就偏灰了。
+    const k = (1 - Math.abs(z / 2.6) * 0.24).toFixed(3);
+    html += `<i class="sl" style="transform:translateZ(${z.toFixed(2)}px);filter:brightness(${k});`
+      + `background-image:url('${src}')"></i>`;
+  }
+  el.innerHTML = html;
+}
+
 function renderPet() {
   const p = petPref();
-  const form = PET_FORMS.some((f) => f.id === p.form) ? p.form : 'card';
+  // ⚠️ 自己做出来的那些 id 是 `u-<名字>`（图在 `/pets/` 下），**不在**内置名单里
+  //    —— 不走这一支的话，`formOf` 会兜底回卡片 ⇒
+  //    用户换到自己造的那只，看到的还是卡片，而**一个错都不报**。
+  const mine = String(p.form || '').startsWith('u-') ? String(p.form).slice(2) : '';
+  const f = mine
+    ? { id: p.form, nm: mine, kind: 'static', img: '/pets/' + encodeURIComponent(mine) + '.png' }
+    : formOf(p.form);
+  const form = f.id;
   const body = $('#petbody');
-  body.className = 'petbody' + (form === 'card' ? ' ptcard' : ORB_KEYED[form] ? ' mono' : '');
-  body.innerHTML = form === 'card' ? '<div class="ck" id="petck"></div>'
-    : (ORB_KEYED[form] ? `<img src="/ui/assets/mineral-${form}-mini.webp" alt="" draggable="false">`
-      : `<video src="${ORB_VIDEO[form]}" muted loop autoplay playsinline></video>`);
-  if (form === 'card') buildCard($('#petck'));
+  body.className = 'petbody' + (f.kind === 'card' ? ' ptcard' : f.kind === 'static' ? ' pslab' : f.keyed ? ' mono' : '');
+  body.innerHTML = f.kind === 'card' ? '<div class="ck" id="petck"></div>'
+    // ⚠️ 静态图那一支**必须在** —— 落不到的时候（名单里没有那个 id）会渲染成空，
+    //    而"空"和"这个形态坏了"长得一模一样。
+    : f.kind === 'static' ? '<div class="slab" id="petslab"></div>'
+      : f.keyed ? `<img src="/ui/assets/mineral-${form}-mini.webp" alt="" draggable="false">`
+        : `<video src="${f.video}" muted loop autoplay playsinline></video>`;
+  if (f.kind === 'card') buildCard($('#petck'));
+  if (f.kind === 'static') buildSlab($('#petslab'), f.img);
+
+  // ⭐ 旋转开关（读者 2026-10-13：「所有的都可以选择是否旋转这个选项，
+  //   一键旋转不旋转，**不然默认旋转**」）。
+  //   ⇒ 默认就是转：只有**明确写了 false** 才停。
+  //   ⚠️ 视频不吃 CSS 动画，要单独 pause —— 只加个类的话，
+  //     勾了"不转"而那个形态还在播，用户会以为开关没生效。
+  const spin = p.spin !== false;
+  body.classList.toggle('pstill', !spin);
+  if (!spin) body.querySelectorAll('video').forEach((v) => { try { v.pause(); } catch { /* 暂停失败也不是错误 */ } });
   $('#pet').dataset.form = form;
   document.body.classList.toggle('pet-letters-off', p.letters === false);
 }
@@ -385,7 +418,36 @@ async function setSrc(src, force) {
 
 // ── 交互 ──────────────────────────────────────────────────────────
 const wheelOpen = () => W.open;
+/**
+ * ⭐ 2026-10-13 读者：「**多APP（包含右键完整功能）、单个app**」两种模式。
+ *
+ * 「单个 app」= 它就只认一个软件 —— **点一下直接切换过去，不展开那一圈**。
+ * ⚠️ 设置存在 localStorage 里（设置页写、这里读），**没有就退化成多 APP** ——
+ *    不退化的话，一个读不到的键会让 Pet 变成点了什么都不发生的哑巴。
+ */
+const singlePath = () => {
+  try {
+    return localStorage.getItem('pet.mode') === 'single'
+      ? (localStorage.getItem('pet.singlePath') || '') : '';
+  } catch { return ''; }
+};
+
+/** 单个 APP 模式下的一击：直接把它叫到前面，不画轮盘。 */
+function launchOne(path) {
+  report('single → ' + path);
+  W.justPicked = true;
+  if (window.webkit?.messageHandlers?.c4) native({ cmd: 'launch', path });
+  else post('/api/apps/activate', { path }).catch(() => {});
+  // ⭐ 告诉原生"这一轮收了、而且切走了一个软件" —— 它据此**不**把键盘焦点还回去
+  //    （还回去的话，刚叫上来的那个 App 又被踢下去了）。
+  native({ cmd: 'closed', picked: true });
+}
+
 function openWheel() {
+  // ⚠️ 这一句必须在**最前面** —— 在它之后任何东西都可能已经改过 DOM 了，
+  //    而单个 APP 模式的承诺是"这一次点击什么圈都不出现"。
+  const one = singlePath();
+  if (one) { launchOne(one); return; }
   if (W.open) return;
   report('OPEN ' + JSON.stringify(W.dbg) + ' @' + who());
   parked = false;

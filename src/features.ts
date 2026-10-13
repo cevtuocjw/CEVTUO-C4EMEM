@@ -700,3 +700,54 @@ export function manageModel(dataDir: string) {
   }));
   return { builtins, installed, navHidden: BUILTIN.filter((f) => f.navHidden).map((f) => f.id), offItems: nav.offItems, removed: nav.removed, retentionDays: RETENTION_DAYS };
 }
+
+/**
+ * 装一个**由对话造出来的**功能（不是目录里那些）。
+ *
+ * ⚠️ 和 `installFeature` 分开写，因为**来源不同**：
+ *    那个从 `CATALOG`（写死的目录）里取，这个的定义是**用户和模型当场聊出来的**。
+ *    合成一个函数的话，就得在 `installFeature` 里塞一个"如果在目录里找不到就去别处找"的
+ *    分支 —— 而那条分支正是"点开一片空白"的入口。
+ *
+ * ⭐ `spec` 那一份**原样存下来**：功能列表里要能回看"当初是照什么做的"，
+ *    不然重装一次就变成一个谁也说不清来历的条目。
+ */
+export function installCustom(
+  dataDir: string,
+  f: { id: string; name: string; view: string; hint?: string; source?: string; spec?: unknown },
+) {
+  const s = loadStore(dataDir);
+  if (s.installed.some((x) => x.id === f.id)) {
+    return { ok: true as const, feature: s.installed.find((x) => x.id === f.id)!, already: true };
+  }
+  const feat: Feature = {
+    id: f.id,
+    name: f.name,
+    icon: 'hand',            // 「自己装的」那一组用的就是这只手
+    group: 'kb',
+    source: f.source ?? 'user',
+    section: 'user',         // ⭐ 侧栏归到「自己装的」——见 `Feature.section` 那段
+    removable: true,
+    origin: 'installed',
+    hint: f.hint ?? '由对话造出来的来源',
+    view: f.view,
+    // ⚠️ 视图是 `search`（已经存在、已经验过），**不新造视图** ——
+    //    新造一个视图就要新造一套渲染 + 一套断言，而"点开一片空白"就是这么来的。
+    needs: [],
+  };
+  // ⚠️ 那份 spec 单独存一个文件（`Feature` 上没有这个字段，硬塞进去会被
+  //    `itemsOf` 那种**逐个字段挑**的映射静默丢掉 —— 见 FACT 里那条）。
+  //    也存在**理由**：功能列表里要能回看"当初是照什么做的"，
+  //    不然重装一次就变成一个谁也说不清来历的条目。
+  const sp = join(dataDir, 'custom-sources.json');
+  let all: Record<string, unknown> = {};
+  try { all = JSON.parse(readFileSync(sp, 'utf8')); } catch { all = {}; }
+  all[feat.id] = { name: f.name, spec: f.spec ?? null, ts: new Date().toISOString() };
+  writeFileSync(`${sp}.tmp`, `${JSON.stringify(all, null, 2)}\n`, 'utf8');
+  renameSync(`${sp}.tmp`, sp);
+  s.installed.push(feat);
+  s.off = (s.off ?? []).filter((x) => x !== f.id);
+  s.removed = (s.removed ?? []).filter((r) => r.id !== f.id);
+  saveStore(dataDir, s);
+  return { ok: true as const, feature: feat, already: false };
+}

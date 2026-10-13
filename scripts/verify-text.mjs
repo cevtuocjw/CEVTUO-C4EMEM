@@ -55,8 +55,36 @@ function rendered(line) {
   const slashes = line.indexOf('//');
   if (slashes >= 0 && slashes < at) return false;      // 行尾注释
   if (!/[一-鿿]/.test(line)) return false;     // 去掉 `**/glob` 那种纯代码
+  // ⚠️⚠️ **假红**：`bubble('it', '…**粗体**…')` / `mdLight('…')` 里的 `**`
+  //    **会被真的转成 <b>** —— 那不是漏网之鱼。
+  //    而且反过来：那里**不能**写 `<b>`（`mdLight` 先转义，写了会原样显示 `&lt;b&gt;`）。
+  //    ⇒ 跳过这一行。⚠️ 代价：同一行里既有 bubble() 又有裸 HTML 文案时会漏判 ——
+  //      **宁可漏判也不要假红**，因为假红会让人开始"调阈值"，然后把真问题一起放过去。
   if (/\*\*\/|\s\*\*\s*[0-9(]/.test(line)) return false;
   return true;
+}
+
+/**
+ * ⚠️⚠️ `**` 出现在哪一层，决定了它是对是错 —— 而行级正则看不出跨行：
+ *
+ *   `bubble('it', '话**重点**话')`     ⇒ **对**（`mdLight` 会把它转成 <b>）；
+ *   `chatBox.insertAdjacentHTML(…, bubble('it',`   ← 参数**换到下一行**
+ *   `  '话**重点**话'));`                            ← 行里没有 `bubble(`，行级正则漏判
+ *
+ * 所以这里跟一个**括号深度**：进了 `bubble(` / `mdLight(` 就一路跳过，
+ * 直到括号配平。⚠️ 这里也**不能**改写成 `<b>`：`mdLight` 是先转义后加标记，
+ * 写了 `<b>` 反而原样显示成 `&lt;b&gt;`。
+ */
+function mdDepthDelta(line) {
+  const m = /(?:mdLight|bubble)\s*\(/.exec(line);
+  if (!m) return 0;
+  // 从那个左括号开始数净深度（简单计数；这两个函数的参数里不会有字符串内的括号）
+  let d = 0;
+  for (let i = m.index + m[0].length - 1; i < line.length; i++) {
+    if (line[i] === '(') d++;
+    else if (line[i] === ')') d--;
+  }
+  return d;
 }
 
 try {
@@ -66,7 +94,7 @@ try {
   const bad = [];
   for (const f of files) {
     const lines = readFileSync(DIR + '/' + f, 'utf8').split('\n');
-    let inHtmlComment = false, inBlockComment = false;
+    let inHtmlComment = false, inBlockComment = false, mdDepth = 0;
     lines.forEach((line, i) => {
       // 多行注释都要**带状态**跳（开、闭常常不在同一行）：
       //   `.html` 里两种 —— `<!-- -->`（页面注释）和 `/* */`（`<style>` 里的）；
@@ -86,7 +114,12 @@ try {
         if (inBlockComment) { if (line.includes('*/')) inBlockComment = false; return; }
         if (line.trimStart().startsWith('/*') && !line.includes('*/')) { inBlockComment = true; return; }
       }
-      if (rendered(line)) { total += 1; bad.push(f + ':' + (i + 1) + '  ' + line.trim().slice(0, 80)); }
+      // ⚠️ 顺序：**先**用当前状态判这一行，**再**更新状态 ——
+      //    反过来的话，`bubble(` 那一行自己会被跳过（它还带着 `(` 呢），
+      //    而它其实正是"从这里开始是 md 参数"的那个信号。
+      const inMd = mdDepth > 0;
+      mdDepth = Math.max(0, mdDepth + mdDepthDelta(line));
+      if (!inMd && rendered(line)) { total += 1; bad.push(f + ':' + (i + 1) + '  ' + line.trim().slice(0, 80)); }
     });
   }
   // ⭐ 汇总行要**带数**：只写"通过"的话，"一处都没有"和"根本没扫到"长得一样
