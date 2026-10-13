@@ -301,12 +301,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     func webView(_ wv: WKWebView, didFinish nav: WKNavigation!) {
         let ms = navStart.map { Int(Date().timeIntervalSince($0) * 1000) } ?? -1
         petLog("界面加载完成 \(ms)ms")
+        crashReloads = 0        // 成功一次 ⇒ "连崩"重新计数
     }
     func webView(_ wv: WKWebView, didFail nav: WKNavigation!, withError e: Error) {
         petLog("界面加载失败 \(e.localizedDescription)")
+        showBoot("界面加载失败", e.localizedDescription)
     }
     func webView(_ wv: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError e: Error) {
+        // ⚠️ 这一条是**主框架**的（子资源失败不会走到这儿）。不铺一张纸的话，
+        //    这里留下的就是一块**纯白**，而用户只会说"软件坏了"。
         petLog("界面加载失败(provisional) \(e.localizedDescription)")
+        showBoot("连不上核心", "\(e.localizedDescription)（日志：~/Documents/Cevtuo-C4emem/pet-bridge.log）")
+    }
+
+    /// ⚠️⚠️⚠️ 2026-10-13 读者：「刚打开软件这个样子存在了特别久，然后**纯白完全不可用**」。
+    ///
+    /// 这是 WKWebView 最阴的一种失败：**WebContent 渲染进程被系统杀掉**
+    /// （内存压力 / GPU / 渲染进程崩溃），窗口就留一块**永久纯白**。
+    /// ⚠️ 页面自己的 `window.onerror` **不会被调用**（跑脚本的那个进程已经没了），
+    ///    服务端也看不到任何请求 —— 界面上和日志里都是"什么都没有"。
+    ///    **只有这一条回调会响**，而原来根本没接它 ⇒ 白着就白着，永远不会自己回来。
+    ///
+    /// ⇒ 记一笔 + **自动重载**（限次数：连崩 3 次就停下铺张纸，别变成无限重启）。
+    private var crashReloads = 0
+    func webViewWebContentProcessDidTerminate(_ wv: WKWebView) {
+        crashReloads += 1
+        petLog("渲染进程被系统终止（WebContent crash，第 \(crashReloads) 次）")
+        if crashReloads <= 3 {
+            wv.load(URLRequest(url: URL(string: kBase)!))
+        } else {
+            showBoot("界面反复崩溃", "已经自动重载 \(crashReloads) 次仍不稳定。日志：~/Documents/Cevtuo-C4emem/pet-bridge.log")
+        }
+    }
+
+    private func showBoot(_ title: String, _ sub: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.webView?.loadHTMLString(Self.bootHTML(title, sub), baseURL: nil)
+        }
     }
 
     private func buildMenu() {
