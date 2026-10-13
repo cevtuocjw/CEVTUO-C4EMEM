@@ -1047,5 +1047,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
-app.setActivationPolicy(.accessory) // 只有菜单栏，不占 Dock
+// ⚠️⚠️⚠️ 就是这一行把 Dock 图标又关掉的 —— **Info.plist 里的 `LSUIElement=false` 被它覆盖了**。
+        //    只改 plist 是没用的（我上一版就是这么改的，实测 `lsappinfo` 里
+        //    `type` 还是 `UIElement`）。读者 2026-10-13：「点击这个软件，
+        //    **没有 logo 在我的 dock 栏里展示**」。
+        //    ⇒ 改成 `.regular`：Dock 里有它、应用切换器里有它；
+        //      点 Dock 图标走的是 `reopen` ⇒ 直接把主界面叫出来（`applicationShouldHandleReopen`）。
+        app.setActivationPolicy(.regular) // Dock + 菜单栏都占（读者要求能在 Dock 里看见）
 app.run()
