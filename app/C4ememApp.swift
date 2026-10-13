@@ -402,6 +402,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                     let tpl = appDir.appendingPathComponent("c4emem.config.json")
                     env["C4EMEM_CONFIG"] = FileManager.default.fileExists(atPath: userCfg)
                         ? userCfg : tpl.path
+                    // ⚠️⚠️⚠️ **这里是"点了没反应 / 一片白"的真凶之一**：
+                    //    配置里 `llm.apiKeyEnv = C4EMEM_LLM_API_KEY` —— 密钥**只能从环境变量来**。
+                    //    而 App 起的核心工作目录是包里的 `Resources/app`，那里**没有 `.env`**
+                    //    ⇒ `hasLlm=false` ⇒ 所有要用模型的功能（提问 / 自我改进 / 主动式…）
+                    //      全部失败，界面上看不出原因，就是"点了一下什么都没有"。
+                    //    ⇒ 把 `~/.c4emem/.env` 灌进子进程环境（读者要的"完全独立"也靠它：
+                    //      凭据住 App 自己的目录，不住仓库）。
+                    let userEnvFile = NSHomeDirectory() + "/.c4emem/.env"
+                    if let txt = try? String(contentsOfFile: userEnvFile, encoding: .utf8) {
+                        var n = 0
+                        for line in txt.split(separator: "\n") {
+                            let t = line.trimmingCharacters(in: .whitespaces)
+                            guard !t.isEmpty, !t.hasPrefix("#"), let eq = t.firstIndex(of: "=") else { continue }
+                            let k = String(t[t.startIndex..<eq]).trimmingCharacters(in: .whitespaces)
+                            var v = String(t[t.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+                            if v.hasPrefix("\"") && v.hasSuffix("\"") && v.count >= 2 {
+                                v = String(v.dropFirst().dropLast())
+                            }
+                            if !k.isEmpty { env[k] = v; n += 1 }
+                        }
+                        petLog("凭据：从 \(userEnvFile) 灌了 \(n) 条环境变量")
+                    } else {
+                        petLog("⚠️ 没有 \(userEnvFile) —— 没有 key 时所有要用模型的功能都会失败（界面看起来就是「点了一下没反应」）")
+                    }
                     p.environment = env
                 }
                 petLog("用打包的核心跑：\(bundled.path)")

@@ -38,8 +38,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>com.cevtuo.c4emem</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.11</string>
-  <key>CFBundleVersion</key><string>12</string>
+  <key>CFBundleShortVersionString</key><string>0.1.12</string>
+  <key>CFBundleVersion</key><string>13</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <!-- ⭐⭐ 2026-10-13 读者：「我点击这个软件，**没有 logo 在我的 dock 栏里展示**」。
        原来是 `LSUIElement=true`（纯菜单栏 App，Dock 里没有图标）—— 那是当初的设计，
@@ -147,6 +147,15 @@ echo "   以后开机自启：系统设置 → 通用 → 登录项 → 添加�
 #     会让 Spotlight / 启动台里出现两个图标，而且 `open -a` 认哪个全凭运气。
 #     要打 dmg 就从 /Applications 那一份打。
 #     ⚠️ 必须放在最后：`du -sh` 报尺寸那行在上面，先删了它就只剩一个空括号。
+# ⚠️⚠️ **一次性把凭据放到 App 自己的目录里**（读者：「这个软件要完全独立」）。
+#    配置里密钥走**环境变量**，而 App 起的核心工作目录是包里的 `Resources/app`，
+#    那里没有 `.env` ⇒ `hasLlm=false` ⇒ 一切要用模型的功能全挂，界面上就是"点了没反应"。
+if [ -f "$PROJECT/.env" ] && [ ! -f "$HOME/.c4emem/.env" ]; then
+  mkdir -p "$HOME/.c4emem"
+  cp "$PROJECT/.env" "$HOME/.c4emem/.env"
+  echo "✅ 已把 .env 复制到 ~/.c4emem/.env（第一次才做）"
+fi
+
 rm -rf "$APP"
 rm -rf "$HERE/C4emem.app"          # 改名之前留下的那个产物，也一并清掉
 echo "✅ 已清掉构建产物（机器上只剩 $DST 这一份）"
