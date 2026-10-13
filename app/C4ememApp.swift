@@ -1057,9 +1057,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         window?.makeKeyAndOrderFront(nil)
     }
     private var uiLoaded = false
+
+    /// ⚠️⚠️⚠️ 读者 2026-10-13：「打开之后软件**全白**…很久很久都是全白屏，**一秒都不能有**」。
+    ///
+    /// 真因（两个叠在一起，一个把另一个锁死了）：
+    ///   ① `startServerIfNeeded()` 是**异步**的 —— 要起核心、核心还要读一遍 891 段知识库；
+    ///      而 `loadUI()` **立刻**就去加载 `http://127.0.0.1:8770/`。那一刻端口还没人听，
+    ///      WKWebView 拿到的是"连接被拒" ⇒ **一片白**。
+    ///   ② 更糟的是 `uiLoaded = true` 写在 `load()` **之前** ⇒ `openUI` 里那句
+    ///      `if !uiLoaded { loadUI() }` 从此永远为假 ⇒ **再也不会重试**，白屏就一直白着。
+    ///
+    /// ⇒ 三件事，缺一条都还是白：
+    ///   ① 窗口一建出来先把**一段内联的"启动中"页**塞进去（同步的，永远不可能是白的）；
+    ///   ② **等核心真的应答了**再加载真界面（后台轮询 + 超时）；
+    ///   ③ 超时就**说出来**（把日志路径写在页面上），而不是留一块白让人猜。
     private func loadUI() {
-        webView?.load(URLRequest(url: URL(string: kBase)!))
+        guard webView != nil else { return }
         uiLoaded = true
+        webView?.loadHTMLString(Self.bootHTML("正在启动核心…",
+                                             "第一次启动要把知识库读一遍，会慢几秒。这个窗口不会白屏。"),
+                                baseURL: nil)
+        petLog("界面：先铺启动页，等核心就绪")
+        waitForCoreThenLoad(deadline: Date().addingTimeInterval(90))
+    }
+
+    /// 后台轮询"核心起来没有"，起来了才把真界面 load 进去。
+    /// ⚠️ 跑在后台队列上：`ping()` 是**阻塞**的（信号量，最多 2.5s），放主线程会把刚铺好的启动页卡住。
+    private func waitForCoreThenLoad(deadline: Date) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let t0 = Date()
+            while Date() < deadline {
+                if self.ping() {
+                    let ms = Int(Date().timeIntervalSince(t0) * 1000)
+                    petLog("核心就绪（等了 \(ms)ms），加载界面")
+                    DispatchQueue.main.async { self.webView?.load(URLRequest(url: URL(string: kBase)!)) }
+                    return
+                }
+                Thread.sleep(forTimeInterval: 0.25)
+            }
+            petLog("等核心超时（90s）—— 把原因写在界面上，不留白")
+            DispatchQueue.main.async {
+                self.webView?.loadHTMLString(
+                    Self.bootHTML("核心没起来",
+                                  "看日志：~/Documents/Cevtuo-C4emem/pet-bridge.log —— 里面会写用哪个核心、有没有报错。"),
+                    baseURL: nil)
+            }
+        }
+    }
+
+    /// 启动/出错时铺的那张纸。⚠️ 底色和页面同一张纸色（`#f7f7f4`），
+    ///   这样"启动中"和"加载完"之间**不闪**，也不会有刺眼的白。
+    private static func bootHTML(_ title: String, _ sub: String) -> String {
+        """
+        <!doctype html><html><head><meta charset="utf-8"><style>
+          html,body{margin:0;height:100%;background:#f7f7f4;color:#22252c;
+            font:14px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
+            display:flex;align-items:center;justify-content:center}
+          .b{text-align:center;max-width:520px;padding:0 24px}
+          .t{font-size:15px;font-weight:650;letter-spacing:.01em}
+          .s{margin-top:10px;font-size:12.5px;color:#8a8d96}
+          .d{margin:18px auto 0;width:26px;height:26px;border-radius:50%;
+            border:2px solid #dcdcd4;border-top-color:#8a8d96;animation:r .9s linear infinite}
+          @keyframes r{to{transform:rotate(360deg)}}
+        </style></head><body><div class="b">
+          <div class="t">\(title)</div><div class="s">\(sub)</div>
+          <div class="d"></div>
+        </div></body></html>
+        """
     }
     /// 菜单里那条「重新载入界面」—— 上面那句"只加载一次"必须留一个出口，
     /// 否则页面卡住就只能退 App（而"卡住"和"坏了"看起来一样）。
