@@ -12,7 +12,7 @@
  * ⚠️ 只监听 127.0.0.1。这是个人知识库，永远不上云。
  */
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig, expandHome } from './config';
 import { openDb, stats, addActivity, listActivity, deleteActivity, usageSummary, addBlock, listBlocks, deleteBlock, recentKinds, turnsOfSession, recentSessions } from './store/db';
@@ -41,6 +41,18 @@ import { pickDevice, ls as adbLs, read as adbRead, pull as adbPull, rm as adbRm,
  *    各带自己的对话和安装键。
  * ⚠️ 拆不出来（模型没按格式写）就**原样返回一条** —— 宁可一条大的，也不要丢内容。
  */
+/** 能力/权限清单 —— 单独一个小文件，读了就用，坏了就当空的（不要把整个服务带崩）。 */
+const capsFile = () => join(cfg.dataDir, 'permissions.json');
+function loadCaps(): { folders: string[]; note?: string } {
+  try {
+    const o = JSON.parse(readFileSync(capsFile(), 'utf8'));
+    return { folders: Array.isArray(o?.folders) ? o.folders.filter((x: unknown) => typeof x === 'string') : [] };
+  } catch { return { folders: [] }; }
+}
+function saveCaps(o: { folders: string[] }) {
+  try { writeFileSync(capsFile(), JSON.stringify(o, null, 2)); } catch { /* 写不下去也不能让服务挂 */ }
+}
+
 function splitFeatures(md: string): { name: string; plan: string }[] {
   const text = String(md || '');
   const lines = text.split('\n');
@@ -419,6 +431,41 @@ const server = Bun.serve({
         const ids = Array.isArray(body.ids) ? (body.ids as number[]) : [];
         const n = deleteActivity(db, ids);
         return json({ ok: true, deleted: n });
+      }
+      // ── 能力 / 权限（读者 2026-10-13：「要给这个软件更多的权限，例如给文件读取等权限，
+      //    也有蓝牙、adb、usb……**但是要让用户来选择**」）──
+      //   ⚠️ macOS 上"读文件"的正解**不是**让 App 要一个全局开关，而是
+      //      **用户亲自挑目录**（NSOpenPanel）⇒ 那个目录就对这个 App 开放了。
+      //      所以这里的模型是：**一张用户自己加的"可读目录"清单**。
+      //   ⚠️ 单独一个文件，别塞进 `settings.json` —— 那个 schema 是 `z.object`，
+      //      **会静默剥掉没声明的键**（FACT 里记过这条）。
+      if (p === '/api/caps') {
+        const caps = loadCaps();
+        return json({ folders: caps.folders, platform: process.platform, note: caps.note });
+      }
+      if (p === '/api/caps/folders' && req.method === 'POST') {
+        const b = (await req.json().catch(() => ({}))) as { path?: string };
+        // ⚠️ 之前那个"清空全部内容"的接口我踩过：**探活不能发一个参数合法的 POST**。
+        //    这里只接受一个**真实存在的目录**，别的一律 400，并且把原因说清。
+        const raw = String(b.path ?? '').trim();
+        if (!raw) return json({ error: '没有给目录' }, 400);
+        const full = expandHome(raw);
+        let st;
+        try { st = statSync(full); } catch { return json({ error: '这个路径不存在：' + full }, 400); }
+        if (!st.isDirectory()) return json({ error: '这不是一个目录：' + full }, 400);
+        const caps = loadCaps();
+        if (!caps.folders.includes(full)) caps.folders.push(full);
+        caps.folders = caps.folders.slice(0, 24);
+        saveCaps(caps);
+        addActivity(db, { kind: 'feature', icon: '📁', title: `允许读一个目录：${full}` });
+        return json({ ok: true, folders: caps.folders });
+      }
+      if (p === '/api/caps/folders' && req.method === 'DELETE') {
+        const q = decodeURIComponent(String(url.searchParams.get('path') ?? ''));
+        const caps = loadCaps();
+        caps.folders = caps.folders.filter((f) => f !== q);
+        saveCaps(caps);
+        return json({ ok: true, folders: caps.folders });
       }
       // ⭐⭐ CEVTUO Pet：**正在运行的桌面 App**（点一下围着它弹出来选一个切过去）
       if (p === '/api/running') {

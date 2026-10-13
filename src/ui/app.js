@@ -4520,7 +4520,78 @@ async function openSettings() {
     '<button class="go" id="reskeep" style="flex:1;white-space:nowrap">恢复设置（保留数据）</button>' +
     '<button class="go" id="resall" style="flex:1;white-space:nowrap;background:#b52d2d">连数据一起清空</button>' +
     '</div></div><div class="k" id="resmsg"></div></div>';
-  $('#dbody').innerHTML = syncCard + usageCard + lookCard + petCard + schema.map((s) => {
+  // ⭐⭐ 权限 / 能力（读者 2026-10-13：「要给这个软件更多的权限，例如给文件读取等权限，
+  //    也有蓝牙、adb、usb 等权限都可以才行 —— **但是要让用户来选择**」）。
+  //
+  //    ⚠️⚠️ 这里**只写它真能做到的**，不假装：
+  //      · **目录** = 用户**亲自挑**的（NSOpenPanel）—— 这是 macOS 上"读文件"的正解，
+  //        挑过的那棵树 App 就真能读；挑完随时能撤。
+  //      · **手机 / ADB** = 真去探（`adb devices`）。
+  //      · **完全磁盘访问 / 辅助功能 / 蓝牙** = **只有用户能在系统设置里开**（macOS 的 TCC）。
+  //        所以这三样只给"状态 + 送他过去"，**不假装能开**。
+  const capsCard = '<div class="sec" id="seccaps"><h3>这个软件能用你的什么</h3>' +
+    '<div class="d">你给它什么，它才能用什么。给了随时能撤。</div>' +
+    '<div id="capbox" class="k">读…</div></div>';
+
+  const sysRow = (label, why, pane) =>
+    '<div class="frow"><b style="flex:none">' + esc(label) + '</b>' +
+    '<span class="k" style="flex:1">' + esc(why) + '</span>' +
+    '<button class="ghost sm" data-openset="' + esc(pane) + '">去系统设置里开</button></div>';
+
+  async function paintCaps() {
+    const box = $('#capbox');
+    if (!box) return;
+    const r = await api('/api/caps').catch(() => null);
+    const folders = (r && r.folders) || [];
+    const adb = await api('/api/adb/status').catch(() => null);
+    const dev = (adb && (adb.devices || adb.items || [])) || [];
+    const on = dev.filter((d) => String(d.state || d.status || '').includes('device')).length;
+    box.innerHTML =
+      '<div class="k" style="margin:6px 0 8px">读文件 —— 挑过的文件夹，它就能读</div>' +
+      (folders.length
+        ? folders.map((f) => '<div class="frow"><span class="k" style="flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(f) + '</span>' +
+            '<button class="ghost sm" data-capdel="' + esc(f) + '">撤</button></div>').join('')
+        : '<div class="k" style="margin-bottom:6px">还没给任何文件夹 —— 点下面那颗挑一个。</div>') +
+      '<button class="go sm" data-cappick="1" style="margin-top:6px">挑一个文件夹给它读…</button>' +
+      '<div class="k" style="margin:14px 0 8px">手机 —— 走 ADB（USB 线或无线都行）</div>' +
+      '<div class="frow"><b style="flex:none">' + (on ? '连着 ' + on + ' 台' : '没连着') + '</b>' +
+        '<span class="k" style="flex:1">' + esc(adb && adb.error ? adb.error : '手机插上并在开发者选项里允许这台电脑即可') + '</span>' +
+        '<button class="ghost sm" data-capadb="1">重新检测</button></div>' +
+      '<div class="k" style="margin:14px 0 8px">下面这几样**只有你自己能在系统设置里开**（macOS 不允许 App 替你开）</div>' +
+      sysRow('完全磁盘访问', '要扫一些很深的系统目录时才需要', 'allfiles') +
+      sysRow('辅助功能', '要驱动别的 App / 模拟按键时才需要', 'accessibility') +
+      sysRow('蓝牙', '要连手环、体重秤这类设备时才需要', 'bluetooth');
+
+    $$('#capbox [data-cappick]').forEach((b) => (b.onclick = () => {
+      // ⚠️ 走**原生**的选目录面板：网页的 <input type=file webkitdirectory> 拿到的是
+      //    浏览器给的一份"假路径"，服务端根本读不到。必须让系统面板给**真路径**。
+      if (window.webkit?.messageHandlers?.c4) native({ cmd: 'pickFolder' });
+      else toast('这个要在 App 里点（浏览器里拿不到真路径）', 'bad');
+    }));
+    $$('#capbox [data-capdel]').forEach((b) => (b.onclick = async () => {
+      await fetch('/api/caps/folders?path=' + encodeURIComponent(b.dataset.capdel), { method: 'DELETE' }).catch(() => {});
+      toast('撤掉了：' + b.dataset.capdel);
+      paintCaps();
+    }));
+    $$('#capbox [data-capadb]').forEach((b) => (b.onclick = () => paintCaps()));
+    $$('#capbox [data-openset]').forEach((b) => (b.onclick = () => {
+      native({ cmd: 'openSettings', pane: b.dataset.openset });
+      toast('已经把你送到系统设置的对应那一页 —— 把里面的开关打开就行');
+    }));
+  }
+  // ⚠️ 挂到 window 上：**调用它的地方在另一个函数里**（在抽屉构建那一段之外），
+  //    直接写 paintCaps() 会 ReferenceError —— 我第一版就是这么挂的，
+  //    结果那一格一直停在「读…」（界面上看不出任何错，因为报错在那个函数之外）。
+  window.paintCaps = paintCaps;
+  // 原生挑完目录会回调这个
+  window.__folderPicked = async (p) => {
+    const r = await post('/api/caps/folders', { path: p });
+    if (r && r.error) return toast(r.error, 'bad');
+    toast('给它读了：' + p);
+    paintCaps();
+  };
+
+  $('#dbody').innerHTML = capsCard + syncCard + usageCard + lookCard + petCard + schema.map((s) => {
     const on = connected?.[s.id];
     // ⚠️ 给接入那几段一个**可寻址的 id**：首次启动引导要滚到第一段上（`#secpet` 那种
     //    命名会和它撞，所以这里用 `secsetup-` 前缀区分）。
@@ -4539,6 +4610,10 @@ async function openSettings() {
           '</div>' + (f.hint ? '<div class="hint">' + esc(f.hint) + '</div>' : '') + '</div>';
       }).join('') + '</div>';
   }).join('') + '<button class="go" id="dsave" style="width:100%">保存</button><div class="k" id="dsaved" style="text-align:center;margin-top:7px"></div>' + resetCard;
+  // ⚠️⚠️ **必须在这里**调（抽屉的 innerHTML 刚写完）—— 我第一版挂在 `#dclose` 那一行上，
+  //    而那是**模块加载时**执行的，那会儿 #capbox 还不存在 ⇒ `paintCaps` 里那句
+  //    `if (!box) return` 直接返回，那一格永远停在「读…」，**而且一个错都不报**。
+  window.paintCaps && window.paintCaps();
   $('#drawer').hidden = false;
   $('#dsync').onclick = () => { try { openSync(); } catch (e) { toast(String(e?.message ?? e), 'bad'); } };
   // ⭐ 设置里也开一扇到**同一个** c4 输入框的门（不是新能力，只是多一个入口）

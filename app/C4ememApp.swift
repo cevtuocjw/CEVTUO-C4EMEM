@@ -113,6 +113,15 @@ final class PetWebView: WKWebView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
+/** 把一个字符串安全地变成 JS 字面量（路径里有引号/反斜杠也不会把注入的脚本弄坏）。 */
+private func jsStr(_ s: String) -> String {
+    let d = try? JSONSerialization.data(withJSONObject: [s], options: [])
+    if let d, let arr = String(data: d, encoding: .utf8), arr.count > 2 {
+        return String(arr.dropFirst().dropLast())      // ["x"] → "x"（已经是合法 JS 字面量）
+    }
+    return "''"
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     private var statusItem: NSStatusItem!
     private var statusLine: NSMenuItem!
@@ -574,6 +583,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "voice":
             openUI()
             jsWhenApp("void (window.__app && window.__app.show('voice'))")
+        // ⭐⭐ 读者 2026-10-13：「要给这个软件更多的权限……**但是要让用户来选择**」。
+        //    macOS 上"读文件"没有"一键授权整块磁盘"这回事（除非完全磁盘访问 + 重启），
+        //    **正解就是让用户亲自挑目录** —— NSOpenPanel 挑过的那棵树，App 就真能读。
+        case "pickFolder":
+            let op = NSOpenPanel()
+            op.canChooseFiles = false
+            op.canChooseDirectories = true
+            op.allowsMultipleSelection = false
+            op.canCreateDirectories = false
+            op.prompt = "允许读这个文件夹"
+            op.message = "挑一个文件夹，这个软件就能读它里面的东西（随时能撤）"
+            if op.runModal() == .OK, let u = op.url {
+                petLog("用户选了目录：\(u.path)")
+                // 回给网页 —— 它拿去 POST /api/caps/folders
+                let js = "window.__folderPicked && window.__folderPicked(" + jsStr(u.path) + ")"
+                petWeb?.evaluateJavaScript(js, completionHandler: nil)
+                webView?.evaluateJavaScript(js, completionHandler: nil)
+            } else {
+                petLog("用户取消了选目录")
+            }
+        // 有的权限**只有用户能在系统设置里开**（macOS 的 TCC）。App 能做的是**把他送过去**，
+        // 并且说清楚是哪一个开关 —— 而不是假装自己能开。
+        case "openSettings":
+            let pane = b["pane"] as? String ?? ""
+            let targets = [
+                "allfiles": "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+                "accessibility": "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                "bluetooth": "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth",
+                "files": "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders",
+                "notifications": "x-apple.systempreferences:com.apple.preference.notifications",
+            ]
+            if let u = targets[pane], let url = URL(string: u) { NSWorkspace.shared.open(url) }
         case "settings":
             openUI()
             jsWhenApp("void (window.__app && window.__app.openPetSettings && window.__app.openPetSettings())")
