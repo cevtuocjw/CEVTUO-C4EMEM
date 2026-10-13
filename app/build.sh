@@ -9,8 +9,12 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd "$HERE/.." && pwd)"
-APP="$HERE/C4emem.app"
-BIN="$APP/Contents/MacOS/C4emem"
+# ⭐⭐ 2026-10-13 读者：「这个软件应该叫做 cevtuo-c4emem，就改 app 名称就可以」。
+# ⇒ 产物、bundle 名、可执行文件名、菜单栏标题全跟着这一个变量走。
+# ⚠️ **bundle identifier（com.cevtuo.c4emem）不动** —— 改它会丢掉已存的偏好设置。
+NAME="cevtuo-c4emem"
+APP="$HERE/$NAME.app"
+BIN="$APP/Contents/MacOS/$NAME"
 
 echo "项目目录：$PROJECT"
 
@@ -28,14 +32,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>Cevtuo C4emem</string>
-  <key>CFBundleDisplayName</key><string>Cevtuo C4emem</string>
-  <key>CFBundleExecutable</key><string>C4emem</string>
+  <key>CFBundleName</key><string>$NAME</string>
+  <key>CFBundleDisplayName</key><string>$NAME</string>
+  <key>CFBundleExecutable</key><string>$NAME</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>com.cevtuo.c4emem</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.4</string>
-  <key>CFBundleVersion</key><string>5</string>
+  <key>CFBundleShortVersionString</key><string>0.1.5</string>
+  <key>CFBundleVersion</key><string>6</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
@@ -118,6 +122,13 @@ codesign --force --deep --sign - "$APP" 2>/dev/null || echo "（codesign 跳过�
 DST="/Applications/$(basename "$APP")"
 rm -rf "$DST"
 ditto "$APP" "$DST"
+# ⚠️ 改名之后（C4emem.app → cevtuo-c4emem.app）**旧的必须删掉** ——
+#    留一个同 bundle id 的旧副本在 /Applications 里，`open -a` / LaunchServices
+#    认哪个全凭运气，表现是"点了图标没反应"（打开的其实是另一个）。
+if [ -d "/Applications/C4emem.app" ]; then
+  rm -rf "/Applications/C4emem.app"
+  echo "（已删掉改名前的 /Applications/C4emem.app）"
+fi
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DST" >/dev/null 2>&1 || true
 
 echo "✅ 生成 $APP  （$(du -sh "$APP" | cut -f1)）"

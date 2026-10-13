@@ -156,6 +156,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         refreshStatus()
     }
 
+    /// ⭐⭐ 读者 2026-10-13：「我点 c4emem 图标，完全没有反应」。
+    ///    —— App 是 `LSUIElement`（菜单栏 App，**Dock 里没有图标、也没有窗口**），
+    ///    而且**很可能已经在跑了**（Pet 就在屏幕上）。这时候在访达 / 启动台里再点一下，
+    ///    macOS 只是发一个 `reopen` 事件，我们**什么都不做** ⇒ 看起来就是"完全没反应"。
+    ///    ⇒ 把主界面叫出来，并且明确**回复 true 表示我处理了这个事件**。
+    ///    ⚠️ 这一条只有 `LSUIElement` 的 App 需要 —— 有 Dock 图标的 App 由系统自己处理。
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        petLog("reopen（已经在跑，把主界面叫出来）")
+        openUI()
+        return true
+    }
+
     func applicationWillTerminate(_ note: Notification) {
         // ⚠️ 只关自己拉起来的那个。如果服务本来就在跑（比如你手动开的），
         //    退 App 不该把它带走。
@@ -194,7 +206,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     @objc private func appSwitched(_ n: Notification) {
         guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              let name = app.localizedName, !name.contains("C4emem") else { return }
+              // ⚠️ 大小写不敏感：App 已改名成 `cevtuo-c4emem`，写死的 `"C4emem"` 匹配不上了
+              //    ⇒ 我们会把自己的切换当成"用户切到了别的软件"往主动式里灌。
+              let name = app.localizedName, !name.lowercased().contains("c4emem") else { return }
         report(type: "appSwitch", context: "刚刚切到 \(name)")
     }
 
@@ -229,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     private func notify(body: String) {
         let c = UNMutableNotificationContent()
-        c.title = "C4emem"
+        c.title = "cevtuo-c4emem"
         c.body = String(body.prefix(240))
         c.sound = .default
         UNUserNotificationCenter.current().add(
@@ -250,10 +264,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         } else {
             statusItem.button?.title = "C4"
         }
-        statusItem.button?.toolTip = "C4emem"
+        statusItem.button?.toolTip = "cevtuo-c4emem"
 
         let menu = NSMenu()
-        let open = NSMenuItem(title: "打开 C4emem", action: #selector(openUI), keyEquivalent: "o")
+        let open = NSMenuItem(title: "打开 cevtuo-c4emem", action: #selector(openUI), keyEquivalent: "o")
         open.target = self
         menu.addItem(open)
 
@@ -920,7 +934,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 contentRect: NSRect(x: 0, y: 0, width: 1320, height: 900),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered, defer: false)
-            w.title = "C4emem"
+            w.title = "cevtuo-c4emem"
             w.center()
             w.minSize = NSSize(width: 900, height: 600)
             // ⚠️ 主窗口这一份也要挂桥：界面里那个"窗口内浮层"版 Pet 右键时要能叫 Swift
@@ -984,7 +998,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private func alert(_ text: String) {
         DispatchQueue.main.async {
             let a = NSAlert()
-            a.messageText = "C4emem"
+            a.messageText = "cevtuo-c4emem"
             a.informativeText = text
             a.runModal()
         }

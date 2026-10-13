@@ -75,6 +75,17 @@
   .pwic .pwkk{position:absolute;right:-3px;bottom:-3px;font-size:9px;font-weight:700;line-height:1;
     padding:2px 4px;border-radius:5px;background:rgba(215,242,74,.95);color:#0f1116;
     pointer-events:none;font-family:ui-monospace,Menlo,monospace}
+  /* ⚠️⚠️ 轮盘展开时**把那张卡收掉**（读者 2026-10-13：「这上边怎么有一个灰色正方形」）。
+     那张卡就是 Pet 本体（`#petbody .ck`，53×92 的竖长矩形），它正好落在轮盘的**正中央**：
+       · 它会**压在扇区上**（截图里 C / D 两格压在卡上）；
+       · 而在真机的透明窗里它渲染出来的是一块**灰扑扑的毛玻璃方片**，
+         读者根本认不出那是 Pet —— 只看到一个"灰色正方形"。
+     ⇒ 展开的时候它是纯干扰，收掉；收起来（`body` 上没有 `pw-on`）时照旧显示。
+     ⚠️ 只改 `opacity`，**不动 `display`** —— 那个卡有 `preserve-3d` 和自转动画，
+        一旦 `display:none` 会重新触发一次布局，收起来的时候会闪一下。 */
+  #petbody{transition:opacity .12s linear}
+  body.pw-on #petbody{opacity:0}
+
   /* 中轴下面那三行：选中的名字 → 来源 → 数量。
      ⚠️ 它们在 Pet 的**正下方**（弧只走"左下→左→上"118°，下面这块是空的）——
         放到正上方会被扇区压住。 */

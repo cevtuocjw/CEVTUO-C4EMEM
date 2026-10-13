@@ -396,7 +396,9 @@ const server = Bun.serve({
       }
       // ⭐⭐ CEVTUO Pet：**正在运行的桌面 App**（点一下围着它弹出来选一个切过去）
       if (p === '/api/running') {
-        return json({ apps: await runningApps({ self: 'C4emem' }) });
+        // ⚠️ 传**全小写**：`running.ts` 那边是大小写不敏感比较，
+        //    这样旧名（`C4emem.app`）和新名（`cevtuo-c4emem.app`）都能排掉。
+        return json({ apps: await runningApps({ self: 'c4emem' }) });
       }
       // ⭐ 批量退出（Pet 右键那个勾选列表）。⚠️ 这是**破坏性**动作：
       //    只接受明确的 paths 数组，空数组直接回 400（"什么都没选"不能当成"全退"）。

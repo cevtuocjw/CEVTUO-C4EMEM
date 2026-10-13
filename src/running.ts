@@ -55,6 +55,11 @@ export async function runningApps(opts: { self?: string } = {}): Promise<Running
   //    `lsappinfo` 给每个 App 标了 `type=`，实测三类：
   //      BackgroundOnly 47 / **Foreground 12** / UIElement 59
   //    ⇒ 只有 `Foreground` 才是"桌面上真的开着的那个窗口"。
+  // ⚠️⚠️ 自我过滤**必须大小写不敏感**。2026-10-13 读者把 App 改名成 `cevtuo-c4emem`
+  //    之后，原来的 `path.includes('C4emem')` 就再也匹配不上了（`c4emem` ≠ `C4emem`）
+  //    ⇒ **C4emem 自己会出现在自己的轮盘里**，点一下等于什么都没发生。
+  //    调用方现在传的是全小写的 `c4emem`，两种名字（旧 `C4emem.app` / 新 `cevtuo-c4emem.app`）都盖得住。
+  const self = String(opts.self ?? '').trim().toLowerCase();
   const out = await run('lsappinfo', ['list']);
   const apps: RunningApp[] = [];
   const seen = new Set<string>();
@@ -62,7 +67,7 @@ export async function runningApps(opts: { self?: string } = {}): Promise<Running
     if (!/type="Foreground"/.test(block)) continue;
     const path = block.match(/bundle path="([^"]+)"/)?.[1];
     if (!path || !path.endsWith('.app')) continue;
-    if (opts.self && path.includes(opts.self)) continue;
+    if (self && path.toLowerCase().includes(self)) continue;
     if (seen.has(path)) continue;
     seen.add(path);
     const named = block.match(/"(?:[^"]*)" ASN|^"?([^"\n]+)"? ASN/);
@@ -78,7 +83,7 @@ export async function runningApps(opts: { self?: string } = {}): Promise<Running
       if (!m) continue;
       const path = bundleOf(m[2]);
       if (!path || !/^\/(Applications|System\/Applications|Users\/[^/]+\/Applications)\//.test(path)) continue;
-      if (opts.self && path.includes(opts.self)) continue;
+      if (self && path.toLowerCase().includes(self)) continue;
       if (seen.has(path)) continue;
       seen.add(path);
       apps.push({ name: basename(path, '.app'), path, pid: Number(m[1]) });
