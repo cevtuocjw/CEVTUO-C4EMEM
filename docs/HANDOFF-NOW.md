@@ -1117,3 +1117,58 @@ cd app/C4emem.app/Contents/Resources/app && ./../c4core     # cwd 必须是 Reso
 - 读者那个正在跑的 app 我**重启过一次**（吃掉旧页面），之后没再动 —— 现在跑的是 0.1.4 的二进制。
 - 网络在这段时间很不稳：`git push` 三次 `Failed to connect … 75001ms`，
   最后靠 `git -c http.version=HTTP/1.1` 重试才通；`gh release create` 反倒一次成功。
+
+---
+
+## 6.13 ⭐⭐ 2026-10-13 深夜（续）：改名 cevtuo-c4emem / 灰方块 / 点不动 —— 以及我改错的一版
+
+读者三句原话，逐条对：
+
+| 读者说 | 真因 / 做法 |
+|---|---|
+| 「这上边怎么有一个灰色正方形」 | 那是 Pet 本体那张卡（`#petbody .ck`，53×92）。**我第一版把它整个藏了 —— 那是错的**，见下 |
+| 「鼠标放上去就没有了，我需要的是**继续它存在**，然后出现那些 app 的 logo」 | ⇒ **撤回**「展开时藏掉 Pet」。要处理的是它**长什么样**，不是把它拿掉 |
+| 「我点 c4emem 图标，完全没有反应」 | `LSUIElement`（菜单栏 App，Dock 里没有图标）而且**通常已经在跑** ⇒ 点图标只发 `reopen` 事件，原来什么都不做。加 `applicationShouldHandleReopen → openUI()`。**实测有效**（日志 `reopen（已经在跑，把主界面叫出来）`，窗口列表里出现 `cevtuo-c4emem`） |
+| 「点击 app 的 logo 又没有任何该窗口在前面了」 | `click` 要求 down 和 up 落在**同一个元素**上；这块面板"展开就抢焦点"，展开后还要 250~300ms 窗口才成为 key ⇒ 缝里那一次的 up 被 AppKit 吃掉，**`click` 永远不来**。⇒ 轮盘改成**按下就选中**（`pointerdown`） |
+| 「这个软件应该叫做 cevtuo-c4emem」 | `build.sh` 抽 `NAME` 变量；产物 / CFBundleName / DisplayName / Executable / 菜单栏标题全跟上。⚠️ bundle id 不动；⚠️ 装完**删掉改名前的 `/Applications/C4emem.app`**（同 id 两个副本会让 `open -a` 认错，表现也是"点了没反应"） |
+
+### ⚠️⚠️ 我改错的那一版（记下来，别再犯）
+
+我把「轮盘中央有个灰色正方形」直接理解成"把它拿掉"，藏了整张卡 —— 读者要的是
+**Pet 在、logo 也在**。我那条"尺寸 53×92、离「选一个…」15px 都对得上"的证据，
+**只证明了位置，一点都没证明"它渲染出来该是灰的"**。
+⇒ 「它不该在这儿」和「它长得不对」是两件事。**那条 CSS 已撤回**，并留了注释在那儿。
+
+⚠️ 「灰色」这件事**我没修**（也不知道该怎么修）：在我这台机器的无头 Chromium 里，
+那张卡渲染出来是**正常的米色「4」牌**；只有在 Reader 那台的真机上才是一块灰扑扑的毛玻璃。
+已知差异：真机的窗口是透明的（`drawsBackground=false`），页面上没有不透明底。
+**下一步要查的就是这个**（大概率跟 `.ck i.gl` 的 `mix-blend-mode: screen` 在透明底上的行为有关）。
+
+### 改名的连带（两处**大小写**）
+
+App 路径从 `C4emem.app` 变成 `cevtuo-c4emem.app` 之后：
+- `running.ts` 的自我过滤 `path.includes('C4emem')` **匹配不上** `cevtuo-c4emem`
+  ⇒ 改成小写比较，调用方传 `'c4emem'`（新旧两个名字都盖得住）。
+  ⭐ 实测：这类 App 在 `lsappinfo` 里的 `type="UIElement"`，**本来就过不了 `Foreground` 那关**，
+  所以这次没露出来；但**别靠那个巧合**。
+- `C4ememApp.swift` 的 `appSwitched` 同款问题（会把自己的切换灌进主动式）。
+
+### 断言 / 回归
+
+`scripts/verify-pet-click.mjs` **4 条**（新增 ③「只按下、不抬手也必须发出 launch」）·
+`scripts/verify-pet-card.mjs` **5 条**（重写成"展开时 Pet 必须还在"）——
+**两条的负向对照都会红**。回归 `verify-petwheel` 92/92 · `verify-pet` 31/31 ·
+`verify-pet-fan-cache` 6/6。
+
+### 发行
+
+**v0.1.5 已发**。⚠️ 头两次资产名是 `cevtuo-c4emem-0.1.5.dmg`（`gh release create file#name`
+那个重命名语法**没生效**），而页面指的是 `Cevtuo-C4emem.dmg` ⇒ **404**。
+已重新上传成正确的名字、删掉错的那份，`curl -L` 跟到底是 **200**。
+⭐ 教训：**`curl` 不带 `-L` 时那个 302 会骗人**（它只表示"重定向到资产"，不管目标在不在）。
+
+### ⚠️ git
+
+`.gitignore` 里写的是具体名 `app/C4emem.app/` ⇒ 改名之后**静默失效**，82MB 的构建产物进了仓库。
+已改成 `app/*.app/`，并用 `git filter-branch` 把历史里那份清掉了（本地仓、无远端，最省事）。
+⚠️ **源码仍然没推远端**（读者没说要推）。
