@@ -113,7 +113,7 @@ final class PetWebView: WKWebView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     private var statusItem: NSStatusItem!
     private var statusLine: NSMenuItem!
     private var window: NSWindow?
@@ -131,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         // ⚠️ 注册默认值必须在**读**它之前：没存过的时候**默认是开的**
         //    （读者的期望就是"它应该在那儿"，而不是"点一下才有"）
         UserDefaults.standard.register(defaults: [kPetOnKey: true])
+        buildMainMenu()
         buildMenu()
         installHotKeys()
         startServerIfNeeded()
@@ -251,6 +252,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     // ── 菜单栏 ──────────────────────────────────────────────
+    /// ⚠️⚠️⚠️ 读者 2026-10-13：「**c4emem 现在不能 command M 缩小到 Dock**」。
+    ///    真因不是窗口不能最小化（`styleMask` 里一直有 `.miniaturizable`），
+    ///    而是 **App 从来没有"主菜单"** —— 以前是 `LSUIElement`（纯菜单栏 App），
+    ///    只有状态栏那颗菜单。而 `⌘M` / `⌘H` / `⌘Q` 这些**系统快捷键是靠主菜单里的
+    ///    菜单项存在的**：没有那个菜单项，按下去就什么都不发生（而且没处看见）。
+    ///    ⇒ 现在它是普通 App 了，把最小的一套主菜单补上。
+    private func buildMainMenu() {
+        let main = NSMenu()
+
+        let appItem = NSMenuItem()
+        main.addItem(appItem)
+        let appMenu = NSMenu()
+        appItem.submenu = appMenu
+        appMenu.addItem(withTitle: "关于 cevtuo-c4emem",
+                        action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "隐藏 cevtuo-c4emem",
+                        action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "退出 cevtuo-c4emem",
+                        action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let winItem = NSMenuItem()
+        main.addItem(winItem)
+        let winMenu = NSMenu(title: "窗口")
+        winItem.submenu = winMenu
+        // action 的目标留空（nil）⇒ 沿响应链找到 key window 去执行，这才是标准做法
+        winMenu.addItem(withTitle: "最小化",
+                        action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        winMenu.addItem(withTitle: "缩放",
+                        action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        winMenu.addItem(.separator())
+        winMenu.addItem(withTitle: "前置全部窗口",
+                        action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        NSApp.windowsMenu = winMenu          // 让系统知道"这就是窗口菜单"（最小化后还能从它恢复）
+
+        NSApp.mainMenu = main
+    }
+
+    // ── 页面加载计时（读者：「加载非常慢，经常会白屏」）──────────────
+    // ⚠️ 先量再改：没有这几个数，就只能靠猜（而"慢"和"坏了"看起来一样）。
+    private var navStart: Date?
+    func webView(_ wv: WKWebView, didStartProvisionalNavigation nav: WKNavigation!) {
+        navStart = Date()
+        petLog("界面开始加载 \(wv.url?.absoluteString ?? "-")")
+    }
+    func webView(_ wv: WKWebView, didFinish nav: WKNavigation!) {
+        let ms = navStart.map { Int(Date().timeIntervalSince($0) * 1000) } ?? -1
+        petLog("界面加载完成 \(ms)ms")
+    }
+    func webView(_ wv: WKWebView, didFail nav: WKNavigation!, withError e: Error) {
+        petLog("界面加载失败 \(e.localizedDescription)")
+    }
+    func webView(_ wv: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError e: Error) {
+        petLog("界面加载失败(provisional) \(e.localizedDescription)")
+    }
+
     private func buildMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // ⭐ 菜单栏那颗就是**那张扑克牌**（读者 2026-10-13：「你的 applogo…应该是那个扑克牌」）。
@@ -974,6 +1032,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             //    画的标题条是**黑的**，顶上就横着一条黑。
             //    ⇒ 把窗口外观钉死成浅色（和页面同一条路），别再跟系统走。
             w.appearance = NSAppearance(named: .aqua)
+            // ⚠️ 页面底色是 #f7f7f4：给它同一个底色，加载那一秒就不是"刺眼的白"，
+            //    看起来像"正在铺纸"，而不是"坏了"。
+            w.backgroundColor = NSColor(calibratedRed: 0xf7/255.0, green: 0xf7/255.0, blue: 0xf4/255.0, alpha: 1)
             w.center()
             w.minSize = NSSize(width: 900, height: 600)
             // ⚠️ 主窗口这一份也要挂桥：界面里那个"窗口内浮层"版 Pet 右键时要能叫 Swift
@@ -982,6 +1043,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             cfg.userContentController.add(self, name: "c4")
             let wv = WKWebView(frame: w.contentView?.bounds ?? .zero, configuration: cfg)
             wv.autoresizingMask = [.width, .height]
+            wv.navigationDelegate = self
             w.contentView = wv
             window = w
             webView = wv
