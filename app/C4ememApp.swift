@@ -475,8 +475,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 p.arguments = ["-lc", "cd '\(kProjectDir)' && exec bun run src/server.ts"]
                 petLog("用仓库里的 bun 跑（没打包核心）")
             }
-            p.standardOutput = FileHandle.nullDevice
-            p.standardError = FileHandle.nullDevice
+            // ⚠️⚠️⚠️ 原来这里把核心的 stdout/stderr **丢进了 /dev/null** ——
+            //    于是"核心起来了却没在听 8770"这种故障，**一个字都看不到**
+            //    （2026-10-13 我查了两轮：App 起的那个进程活着、端口却是 000，
+            //      手动跑同一个二进制却立刻正常；差别只能从它的输出里找，而输出被丢了）。
+            //    ⇒ 写到 `~/.c4emem/core.log`。这一行本可以省掉那两轮。
+            let coreLog = NSHomeDirectory() + "/.c4emem/core.log"
+            if !FileManager.default.fileExists(atPath: coreLog) {
+                FileManager.default.createFile(atPath: coreLog, contents: nil)
+            }
+            if let fh = FileHandle(forWritingAtPath: coreLog) {
+                try? fh.seekToEnd()
+                petLog("核心日志 → \(coreLog)")
+                p.standardOutput = fh
+                p.standardError = fh
+            } else {
+                p.standardOutput = FileHandle.nullDevice
+                p.standardError = FileHandle.nullDevice
+                petLog("⚠️ 打不开 \(coreLog) —— 核心输出只能丢掉")
+            }
             do {
                 try p.run()
                 DispatchQueue.main.async { self.server = p; self.ownServer = true }
