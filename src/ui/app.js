@@ -3970,8 +3970,17 @@ function renderKb() {
       //     ·「这样让界面**简单**」
       //   ⚠️ 全部状态就一个：`PROP_ACTIVE`（选中的那条 id，存 localStorage）。
       //     它空 ⇒ 显示"方向"列表；它指向某条 ⇒ **只画那一条**。
+      // ⚠️ 气泡里原来是 `esc()` 之后直接铺 —— 于是模型写的 `**重点**` 会**原样显示成星号**
+      //    （读者 2026-10-13 的截图里满屏都是 `**`）。这里做一层极小的 markdown：
+      //    先转义，再只认 **粗体** / `行内码` / 行首 `- ` 列表 —— 够用了，
+      //    不要引一个 markdown 库进来（那会带来一整套 XSS 面）。
+      const mdLight = (t) => esc(String(t ?? ''))
+        .replace(/\*\*([^*\n]{1,80})\*\*/g, '<b>$1</b>')
+        .replace(/`([^`\n]{1,60})`/g, '<code>$1</code>')
+        .replace(/^\s*[-*]\s+/gm, '• ');
       const bubble = (who, text) =>
-        '<div class="pb ' + (who === 'me' ? 'me' : 'it') + '"><div class="pbt">' + esc(text) + '</div></div>';
+        '<div class="pb ' + (who === 'me' ? 'me' : 'it') + '"><div class="pbt">' +
+          (who === 'me' ? esc(text) : mdLight(text)) + '</div></div>';
       // 一问一答 → 两条气泡（读者的：他给你对话、你给用户对话）
       const thread = (x) => (x.msgs || []).map((m) => bubble('me', m.q) + bubble('it', m.a)).join('');
 
@@ -4251,9 +4260,22 @@ function renderKb() {
         if (!q) return toast('先说要问什么', 'bad');
         b.disabled = true; b.textContent = '…';
         const r = await post('/api/proposals/chat', { id, q });
-        b.disabled = false; b.textContent = '沟通';
-        if (r.error) return toast(r.error, 'bad');
-        renderKb();
+        b.disabled = false; b.textContent = '发送';
+        if (r && r.error) return toast(r.error, 'bad');
+        // ⚠️⚠️ 这里**不要 `renderKb()`** —— 读者 2026-10-13：
+        //    「我一跟它对话完它思考完它就跑到这个页面**最上面**去了」。
+        //    整块重画会把滚动位置一起丢掉。⇒ 只把**这两条气泡**追加进这一块的会话区，
+        //    再把会话区滚到底（这一条也不重画，所以不会跳）。
+        const msgs = (r && r.item && r.item.msgs) || [];
+        const ans = msgs.length ? msgs[msgs.length - 1].a : '';
+        const box = document.querySelector('.propblock[data-prop="' + id + '"] .pchat');
+        if (box) {
+          box.insertAdjacentHTML('beforeend', bubble('me', q) + bubble('it', ans || '（没答上，再问一次试试）'));
+          box.scrollTop = box.scrollHeight;
+          inp.value = '';
+        } else {
+          renderKb();                     // 兜底：找不到那一块（比如刚被删了）
+        }
       }));
       $$('[data-pplan]').forEach((b) => (b.onclick = async () => {
         b.disabled = true; b.textContent = '在想步骤…';
