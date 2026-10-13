@@ -1059,3 +1059,61 @@ cd app/C4emem.app/Contents/Resources/app && ./../c4core     # cwd 必须是 Reso
 
 `usersite` 的 `main` 上有另一个窗口的两条提交（都是改下载链接那一行）⇒ `git pull --rebase`
 冲突**只在那一行**，取"不带版本号"那侧解决。**以后往这个仓库推之前先 `git fetch`。**
+
+---
+
+## 6.12 ⭐⭐⭐ 2026-10-13 深夜：Pet 幽灵 + 装不上的 App + 门户入口 + 发行 0.1.4
+
+读者的四句原话，逐条对：
+
+| 读者说 | 真因 | 在哪修的 |
+|---|---|---|
+| 「为什么我电脑上没有可以搜到的 c4emem 可以使用的 app」 | `.app` **从来没装过** —— 只有构建产物在 `~/Documents/Cevtuo-C4emem/app/`。Spotlight 只认 `/Applications` | 已 `ditto` 装进 `/Applications` ＋ `lsregister -f`；**并写进 `app/build.sh` 结尾**（以后构建自己装） |
+| 「apps.cevtuogrnd.com 要给我们这个也加上去」 | 门户页（`usersite/index.html`）**没有 C4emem 的入口**，`/c4emem/` 只能靠知道 URL 进 | 门户页加了 sparkle 图标那一行；`c4emem` 页脚加「← 全部应用」 |
+| 「软件关了，Pet 的扇里还有它的 logo；Qwen 开着却不显示」 | `src/ui/pet.js` 的 `loadSrc`：`if (!force && srcCache[src]) return srcCache[src]`，而 `openWheel` 那次 `setSrc(src)` **不带 force** ⇒ **缓存填过一次就永远命中** | **「正在运行」改成每次现读**；`setSrc` 去掉"先清空再画"那一帧；`qRefresh` 顺手纠正缓存 |
+| 「点击…没有反应」 | ① 点的是**已经不在运行的那一格**（点不动的正当理由）；② 落在**扇形带上**（不是图标上）原来只有图标才认 | 选择器本来就有 `.pwsg`；新增**点空不再静默**（写 `client.log`） |
+
+### ⚠️ 我自己做错、当场改掉的
+
+- 给点击加了一段"按坐标补中最近一格"的兜底 ⇒ **负向对照全绿**（证明那段代码从来没被跑到）
+  ⇒ **删掉了**。见 FACT #68。
+- 验证器的落点**前两版都写死了**，两次都"看起来在测"其实没测到 ⇒ 改成用
+  `elementFromPoint` 扫，扫到"在 `.pwsg` 上、且不在 `.pwic` 上"才算数 ⇒ 负向对照才红。见 FACT #69。
+
+### 新增/改动的文件
+
+- `src/ui/pet.js` —— 上面那三处。
+- `scripts/verify-pet-fan-cache.mjs`（**6 条**，新建）—— 打桩 `/api/running` 成 A/B 两份，
+  走**真实 `__petMouse`** 摸一下 / 挪开 / 再摸；负向对照会红（exit 1，症状逐字复现）。
+- `scripts/verify-pet-click.mjs`（**3 条**，新建）—— 真实鼠标点；② 落在扇形带上也要中；
+  负向对照（把 `.pwsg` 从选择器拿掉）会红。
+- `app/build.sh` —— 版本 **0.1.4 / build 5**；结尾加"装进 /Applications + lsregister"。
+- `.gitignore` —— 补 `out/`、`app/C4emem.app/`、`app/.build.swift`、`pet-bridge.log`、`__pycache__/`。
+
+### ⭐⭐ 这个项目**第一次进版本控制**
+
+`git init -b main` ＋ 首次提交 **`a9f3b27`**（137 个文件）。
+⚠️ **只建在本地** —— `cevtuocjw/CEVTUO-C4EMEM` 那个远端仓库现在**只放发行包**，
+源码没推（要不要推是读者的决定）。
+⚠️ `.env` / `c4emem.config.json`（里面有 token）核过**没被带进来**。
+
+### 发行
+
+- **v0.1.4 已发**：<https://github.com/cevtuocjw/CEVTUO-C4EMEM/releases/tag/v0.1.4>
+  资产 **`Cevtuo-C4emem.dmg`**（47MB，**不带版本号** ⇒ 页面不用改链接）。
+- ⭐ **这次把 dmg 挂起来验了内容**（上一轮没做到）：`0.1.4 / build 5`、
+  包里 `pet.js` 两处修复都在、`CardTemplate*.png` 两张都在。配方见 FACT #71。
+- 分发页补了「**块库**」「**首次启动引导**」两条 ⇒ 全部功能 **34 项**；
+  已推 `usersite`（`ff73acb`），线上确认。
+
+### ⚠️ 回归（都跑过）
+
+`verify-petwheel` **94/94** · `verify-pet` **31/31** · `verify-pet-fan-cache` **6/6** ·
+`verify-pet-click` **3/3**（＋负向对照会红）。
+
+### ⚠️ 没做的
+
+- **源码没推远端**（见上）。
+- 读者那个正在跑的 app 我**重启过一次**（吃掉旧页面），之后没再动 —— 现在跑的是 0.1.4 的二进制。
+- 网络在这段时间很不稳：`git push` 三次 `Failed to connect … 75001ms`，
+  最后靠 `git -c http.version=HTTP/1.1` 重试才通；`gh release create` 反倒一次成功。
