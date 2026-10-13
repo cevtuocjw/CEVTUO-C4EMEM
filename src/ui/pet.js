@@ -365,8 +365,17 @@ async function setSrc(src, force) {
   //    比整圈空一下好看得多。
   const apps = await loadSrc(src, force);
   if (W.src !== src) return;   // 期间又换过源 ⇒ 别拿上一份的旧结果盖回去
+  // ⚠️⚠️⚠️ **列表和现在画着的一模一样，就别重画。**
+  //    `paintWheel()` 是 `host.innerHTML = …` —— 它把**每一格都换成新节点**。
+  //    读者正把光标移向某一格、手指刚好在那一刻按下，按下与抬起就落在**不同节点**上
+  //    ⇒ `click` **永远不来**，屏幕上就是"点了调取不到窗口"。
+  //    ⚠️ 这个坑是 2026-10-13 我自己引进来的：把 `running` 改成"每次现读"之后，
+  //       **每次展开都必然再画一次**（以前是缓存命中，重画只跨一个微任务，感觉不出来）。
+  //    列表真的变了（那才是要修的那个 bug）时照旧重画。
+  const same = W.apps.length === apps.length
+    && W.apps.every((a, i) => a.path === apps[i].path && a.name === apps[i].name);
   W.apps = apps;
-  paintWheel();
+  if (!same) paintWheel();
   // ⭐ 运行中一个都没有（开机就点它）⇒ 自动退到全部应用，并**说出来**
   if (src === 'running' && !W.apps.length) {
     report('running 为空，退到 all');
@@ -393,7 +402,11 @@ function openWheel() {
   native({ cmd: 'focus' });
   W.apps = srcCache[W.src] || [];
   paintWheel();                       // 先用缓存那份画（点一下立刻有东西）
-  setSrc(W.src).then(() => { if (W.open) paintWheel(); });
+  // ⚠️⚠️ 这里**不能再补一次 `paintWheel()`**（原来写的是 `.then(() => paintWheel())`）。
+  //    它会把刚画好的每一格**无条件换成新节点**，而读者的手指很可能正好在那一刻按下
+  //    ⇒ 按下和抬起落在**不同元素**上 ⇒ `click` 永远不来 ⇒「点了调取不到窗口」。
+  //    `setSrc` 内部已经处理了"列表真的变了才重画"（见那段注释）。
+  setSrc(W.src);
 }
 function closeWheel() {
   if (!W.open) return;
@@ -687,23 +700,12 @@ document.addEventListener('pointerdown', (e) => {
  *    而点扇区时我们**根本没有开始拖**（见 pointerdown 那一句提前 return）⇒
  *    那条路永远走不到。"点扇区没反应"就是这么来的。
  */
-// ⚠️⚠️ **按下就选中**（2026-10-13 加的，处理读者第二次报的「点击…没有反应」）。
-//    `click` 要求 down 和 up **落在同一个元素上**；而这块面板是"展开就抢焦点"的
-//    （实测展开后还要 250~300ms 窗口才真的成为 key，见 client.log 的
-//    「键盘状态 已接通 / 网页有焦点=false → true」那两行）——
-//    落在那个缝里的那一次点击，up 可能被 AppKit 吃掉 ⇒ **`click` 永远不来**，
-//    屏幕上就是"点了没反应"，而日志里连一条都没有。
-//    ⇒ 按下即选（径向菜单的常规做法），也更贴合"要飞速打开"。
-//    `pick()` 里会 `closeWheel()`，那一圈随即消失 ⇒ 后面那次 `click` 落在空处，
-//    **不会重复触发**。
-$('#pwwheel').addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
-  const seg = e.target.closest?.('.pwic, .pwsg');
-  if (!seg) return;
-  e.preventDefault();          // 免得再补一次 click（同一次按下只想选一次）
-  pick(Number(seg.dataset.i));
-});
-
+// ⚠️⚠️ 2026-10-13 **撤回"按下就选中"**：读者反馈「今天没修改之前是没有问题的，
+//    现在越改越错误」。那一版的真因不是 `click` 被吞，而是**轮盘展开后多画了一次**
+//    （见 `setSrc` 里那段）—— 重画换了节点，click 才丢的。
+//    ⇒ 修在源头（列表没变就不重画），交互**保持原样**：按下 → 抬起 → 选中。
+//    ⚠️ 教训：症状（"点了没反应"）对上了就动手，容易把**没病的地方**一起改掉；
+//       先找"和以前比多做了什么"，再决定动不动交互。
 $('#pwwheel').addEventListener('click', (e) => {
   // ⭐ **两个都算选中**：压在图标上、或压在它那一段扇形带（`.pwsg`）上 —— 判据和悬停一致，
   //    都是"落在这一个扇区的角度 + 半径范围里"。图标只有 22~30px，而扇区带宽 38~52px，

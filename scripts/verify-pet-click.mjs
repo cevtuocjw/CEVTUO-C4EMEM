@@ -124,18 +124,36 @@ console.log('② 点偏一点：落在**同一格的扇形带上**（没压在�
   await p.close();
 }
 
-console.log('③ 只按下、**不抬手** —— 也必须已经发出 launch（`click` 被 AppKit 吞掉时的兜底）');
+console.log('③ 展开之后**不能重画**（列表和上次一样时）—— 这是"点击调取不到窗口"的真因');
 {
   const { p, info } = await openWheel();
+  // 先收起再展开一次 ⇒ 这次 `srcCache.running` 已经有东西，展开时会先拿它画一帧。
+  await p.evaluate(() => window.__petHover(false));
+  await p.waitForTimeout(450);
+
+  // ⚠️ 在同一次 evaluate 里"展开 + 立刻打标记"：打标记之后那次 fetch 才回来，
+  //    所以能精确回答"它有没有在展开后把这一圈重建掉"。
+  const tagged = await p.evaluate(() => {
+    window.__petOpen();
+    const els = [...document.querySelectorAll('#pwwheel .pwic')];
+    els.forEach((e) => { e.__mine = true; });
+    return els.length;
+  });
+  await p.waitForTimeout(900);                    // 远超那次 fetch 的时间
+  const after = await p.evaluate(() => {
+    const els = [...document.querySelectorAll('#pwwheel .pwic')];
+    return { now: els.length, survived: els.filter((e) => e.__mine === true).length };
+  });
+  ok(tagged > 0, '展开的第一帧就有 ' + tagged + ' 格（用的是上一次的缓存那份）');
+  ok(after.now > 0 && after.survived === after.now,
+    '那一圈没有被重建（重画 = 换节点 = 按下和抬起落在不同元素上 ⇒ click 丢）',
+    JSON.stringify(after));
+
+  // 而且等它一会儿之后再点，照样能中
   const t = info.items.find((s) => s.path.includes('Delta'));
-  await p.mouse.move(t.cx, t.cy);
-  await p.waitForTimeout(60);
-  await p.mouse.down();                          // ⚠️ 故意不 up：模拟"up 没到网页"
-  await p.waitForTimeout(350);
-  const sent = await p.evaluate(() => window.__sent);
-  const L = sent.filter((m) => m && m.cmd === 'launch');
-  ok(L.length === 1 && L[0].path.includes('Delta'), '按下就发出了 launch Delta', JSON.stringify(sent));
-  await p.mouse.up();
+  await realClick(p, t.cx, t.cy);
+  const L = (await p.evaluate(() => window.__sent)).filter((m) => m && m.cmd === 'launch');
+  ok(L.length === 1 && L[0].path.includes('Delta'), '展开后等一会儿再点，仍然能中', JSON.stringify(L));
   await p.close();
 }
 
