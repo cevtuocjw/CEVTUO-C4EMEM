@@ -1,0 +1,1604 @@
+/* C4emem —— 极简三栏 + 玻璃货架
+   底色近白、只留一种强调色（柠檬绿）。能不加的框和线就不加。 */
+:root{
+  --bg:#f7f7f4; --surface:#fff; --line:#e9e9e3; --line2:#f2f2ee;
+  --ink:#16181d; --dim:#767d8a; --lime:#d7f24a; --lime-ink:#1a1d11;
+  --ok:#0f9d63; --r:13px;
+  /* 玻璃四处复用同一份配方 —— 单点改，别一处一处调 */
+  --g-bg:rgba(255,255,255,.52);
+  --g-bd:rgba(255,255,255,.78);
+  --g-shadow:0 12px 36px rgba(18,22,40,.10), inset 0 1px 0 rgba(255,255,255,.9);
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}      /* ⚠️ 作者写的 display 会盖过 UA 的 hidden */
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+  font:13.5px/1.62 -apple-system,BlinkMacSystemFont,"PingFang SC",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+code{background:#eef0f4;padding:1px 5px;border-radius:5px;font-size:11.5px}
+.k{color:var(--dim);font-size:11.5px}
+
+.app{display:flex;height:100vh}
+
+/* ── 1 栏：导航（拍平）────────────────────────────── */
+.side{width:186px;flex:none;position:relative;
+  background:linear-gradient(180deg, color-mix(in srgb, var(--tint) 13%, #fff) 0%, #fff 44%);
+  border-right:1px solid color-mix(in srgb, var(--tint) 20%, var(--line));
+  display:flex;flex-direction:column;padding:14px 9px 78px;gap:1px}
+/* 左沿那道色条 —— 来源换了它先变，比整栏染色更早被眼睛看到 */
+.side:before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--tint),var(--tint2));opacity:.95}
+/* 融合模式：杂色 —— 用户原话「完全不管，就杂色」 */
+.side.blend:before{background:linear-gradient(180deg,#e2593f,#e0a800,#2f9e8f,#2b7cd3,#a259ff,#c457a8)}
+.side.blend{background:linear-gradient(180deg,
+  rgba(226,89,63,.11), rgba(224,168,0,.10) 20%, rgba(47,158,143,.10) 40%,
+  rgba(43,124,211,.10) 62%, rgba(162,89,255,.11) 82%, rgba(196,87,168,.11))}
+.brand{font-weight:640;font-size:14px;display:flex;align-items:center;gap:8px;padding:0 8px 14px}
+/* 那颗标是 88px 的图、显示成 20px（2x 屏才不糊）；`.dot` 是服务状态灯，不是 logo */
+.brand .mark{width:20px;height:20px;border-radius:6px;flex:none;display:block}
+/* ⚠️ 这颗点原来是**纯装饰**（柠檬绿 + 光晕），不表示任何东西 ——
+   读者看到就问「这些小点绿色蓝色，意义是什么」。装饰性颜色点是纯噪声：
+   现在给它一个真含义 —— **本地服务在不在跑**。默认灰 = 还没测出来。 */
+.brand .dot{width:8px;height:8px;border-radius:50%;background:#c9ced8;flex:none;transition:background .2s}
+.brand .dot.live{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent)}
+.brand .dot.dead{background:#e2593f;box-shadow:0 0 0 3px rgba(226,89,63,.22)}
+.hr{height:1px;background:var(--line);margin:9px 8px}
+.nv{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;
+  padding:7px 9px;border-radius:9px;font-size:13px}
+.nv:hover{background:var(--line2)}
+.nv.on{background:var(--ink);color:#fff}
+.nv.sm{font-size:12.5px;color:var(--dim)}
+/* ⚠️ 灰掉是**说**不是**藏**：点了会说清"为什么现在点不了"（见 navBlocked）。
+   所以是 `.na` 类，不是 `disabled` 属性 —— 禁用按钮连 click 都不发，话就没处说了。 */
+.nv.na{opacity:.42;cursor:not-allowed}
+.nv.na:hover{background:none}
+.nv.na svg,.nv.na .ic{filter:grayscale(1)}
+
+/* ── 2 栏：记录 = 工作区看板（底层）────────────────── */
+.dash{width:312px;flex:none;background:var(--surface);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0}
+.dashhead{display:flex;align-items:center;justify-content:space-between;padding:16px 13px 8px;font-size:13px}
+.filters{display:flex;gap:1px}
+.flt{border:0;background:none;border-radius:7px;padding:2px 7px;font-size:12px;color:var(--dim)}
+.flt.on{background:var(--line2);color:var(--ink)}
+.newrow{display:flex;gap:6px;padding:0 13px 10px;flex-wrap:wrap}
+.newrow button{flex:1;min-width:88px;background:var(--surface);border:1px solid var(--line);
+  border-radius:9px;padding:7px 8px;font-size:12px}
+.newrow button:hover{border-color:var(--ink)}
+.loglist{flex:1;overflow:auto;padding:0 7px 8px}
+/* ── 记录的搜索 / 批量删除（读者 2026-10-10）────────────────────
+   ⚠️ 多选态必须**一眼看得出来**（整栏进了"选择模式"），
+      否则点一下就从"打开"变成"勾选"，而界面上没有任何提示 —— 那是误删的来源。 */
+.recsearch{display:flex;gap:6px;padding:0 9px 8px}
+.recsearch input{flex:1;min-width:0;font-size:12.5px;padding:7px 9px}
+.recpick{font-size:12px;padding:0 10px;border:1px solid var(--line);background:var(--surface);
+  border-radius:9px;cursor:pointer;color:inherit;white-space:nowrap}
+.recpick.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.recbulk{display:flex;align-items:center;gap:8px;padding:8px 9px;margin:0 9px 8px;
+  border-radius:10px;background:color-mix(in srgb, var(--tint) 10%, var(--surface));
+  border:1px solid var(--line)}
+.recbulk .k{flex:1;font-size:12px}
+.recbulk .sm{padding:5px 10px;font-size:12px}
+.recbulk .go:disabled{opacity:.45;cursor:not-allowed}
+/* 选择模式：每条前面出现一个勾选框；选中的那条整块变色 */
+.item.pick{position:relative;padding-left:26px}
+.item.pick:before{content:'';position:absolute;left:9px;top:calc(50% - 7px);width:14px;height:14px;
+  border-radius:4px;border:1.5px solid var(--line2);background:#fff}
+.item.pick.sel:before{background:var(--lime);border-color:var(--lime)}
+.item.pick.sel:after{content:'';position:absolute;left:13px;top:calc(50% - 4px);width:5px;height:8px;
+  border-right:2px solid var(--lime-ink);border-bottom:2px solid var(--lime-ink);transform:rotate(42deg)}
+.item{padding:8px 9px;border-radius:9px;cursor:pointer;margin-bottom:1px}
+.item:hover{background:var(--line2)}
+.item.on{background:#eef3ff}
+.item.sel{background:#eaf5c9}
+.item .r1{display:flex;align-items:center;gap:7px;font-size:13px}
+.item .ic{width:17px;text-align:center;flex:none}
+.item .ttl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .r2{font-size:11px;color:var(--dim);margin-top:2px;padding-left:24px;display:flex;gap:8px}
+.usagebar{border-top:1px solid var(--line);padding:9px 13px;font-size:11.5px;color:var(--dim)}
+.usagebar b{color:var(--ink)}
+.usagebar .spark{display:flex;gap:2px;align-items:flex-end;height:18px;margin-top:5px}
+.usagebar .spark i{flex:1;background:var(--lime);border-radius:2px;display:block;min-height:2px}
+
+/* ── 3 栏：内容 ─────────────────────────────────── */
+.main{flex:1;position:relative;min-width:0;display:flex}
+.pane{flex:1;display:flex;flex-direction:column;min-height:0}
+.modes{position:absolute;right:18px;top:15px;z-index:20;display:flex;gap:7px}
+.thumb{display:flex;flex-direction:column;align-items:center;gap:2px;width:56px;padding:7px 3px 5px;
+  border-radius:11px;background:var(--surface);border:1px solid var(--line);font-size:10.5px;color:var(--dim);opacity:.6}
+.thumb span{font-size:16px;line-height:1}
+.thumb i{font-style:normal}
+.thumb:hover{opacity:1}
+.thumb.on{opacity:1;border-color:var(--ink)}
+
+.orbwrap{flex:1;min-height:0}
+#orb{width:100%;height:100%;display:block}
+.vstate{text-align:center;font-size:12px;color:var(--dim);padding:0 20px 7px}
+.vlog{height:142px;overflow:auto;margin:0 30px;padding:10px 13px;background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--r);font-size:13px}
+.vlog .you{color:var(--dim)}
+.vlog .you b{color:var(--ink)}
+.vlog .ai{margin:7px 0 11px;white-space:pre-wrap}
+.vlog .cur{opacity:.55}
+.vbar{display:flex;align-items:center;gap:9px;padding:12px 30px 7px}
+.mic{width:48px;height:48px;flex:none;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:19px;display:grid;place-items:center}
+.mic.live{background:var(--lime);border-color:transparent;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(215,242,74,.75)}50%{box-shadow:0 0 0 13px rgba(215,242,74,0)}}
+.vbtn{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;white-space:nowrap}
+.vtype{flex:1}
+.vtype input{width:100%}
+input[type=text]{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 13px;outline:none}
+input[type=text]:focus{border-color:var(--ink)}
+.vhint{padding:0 30px 14px;color:var(--dim);font-size:11px;text-align:center}
+
+/* 消息 —— 可拖动（拖到货架）*/
+.thread{flex:1;overflow:auto;padding:66px 30px 10px;max-width:780px;width:100%;margin:0 auto}
+.msg{margin-bottom:12px;display:flex;gap:9px}
+.msg .who{flex:none;width:24px;text-align:center;font-size:14px;line-height:1.6}
+.msg .body{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:11px 14px;white-space:pre-wrap}
+.msg.me .body{background:#eef3ff;border-color:#e0e9ff}
+.msg[draggable=true]{cursor:grab}
+.msg .srcs{font-size:11px;color:var(--dim);margin-top:6px}
+.tbar{display:flex;gap:8px;padding:10px 30px 18px;max-width:780px;width:100%;margin:0 auto}
+.tbar input{flex:1}
+button.go{background:var(--lime);color:var(--lime-ink);border:1px solid transparent;border-radius:10px;padding:10px 18px;font-weight:640}
+button.ghost{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 14px}
+button.mini{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:4px 9px;font-size:11.5px}
+
+/* ── 流程 ── */
+.flowhead{display:flex;justify-content:space-between;gap:12px;padding:64px 30px 8px;flex-wrap:wrap}
+.flowlist{flex:1;overflow:auto;padding:4px 30px 10px}
+.blk{display:flex;gap:11px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:2px;cursor:pointer}
+.blk.sel{border-color:var(--ink)}
+.blk.drag{opacity:.4}
+.blk .kb{flex:none;display:flex;flex-direction:column;align-items:center;gap:1px;width:56px}
+.blk .kb .ic{font-size:16px}
+.blk .kb .nm{font-size:10px;color:var(--dim);text-align:center;line-height:1.2}
+.blk .c{flex:1;min-width:0}
+.blk .c .txt{font-size:13px;outline:none;min-height:20px}
+.blk .c .txt:empty:before{content:attr(data-ph);color:#bdc2cc}
+.tags{display:flex;gap:5px;margin-top:4px;flex-wrap:wrap}
+.tag{font-size:10px;padding:1px 6px;border-radius:4px;background:#eef0f4;color:#4a5468}
+.tag.notion{background:#e9f3ec;color:#20633b}
+.tag.wecom{background:#eaf2fd;color:#1c4f96}
+.tag.feishu{background:#f0edfd;color:#4b3a9c}
+.tag.kb{background:#fdf3e2;color:#8a5b06}
+.conn{height:12px;margin-left:38px;border-left:2px dashed #d9dde4}
+.addrow{margin-top:7px;border:1px dashed var(--line);border-radius:11px;padding:10px;text-align:center;color:var(--dim);font-size:12.5px}
+.addrow:hover{border-color:var(--ink);color:var(--ink)}
+.flowfoot{display:flex;gap:9px;align-items:center;padding:9px 30px 18px}
+.flowempty{color:var(--dim);font-size:12.5px;padding:22px 0;text-align:center}
+.kpick{position:fixed;z-index:90;background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 14px 44px rgba(0,0,0,.14);padding:7px;min-width:230px;max-height:320px;overflow:auto}
+.kpick .hd{font-size:10px;color:var(--dim);padding:5px 8px 2px}
+.kpick button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:0;padding:6px 8px;border-radius:8px;font-size:12.5px}
+.kpick button:hover{background:var(--line2)}
+/* 「块库」面板：每行右边那颗「收起 / 放出」 */
+.kpick.lib{min-width:264px;max-height:62vh}
+.kpick.lib button .st{margin-left:auto;font-size:10.5px;font-weight:400;color:var(--dim)}
+.kpick.lib button.off{opacity:.55}
+.kpick.lib button.off .st{color:var(--ink);font-weight:500}
+
+/* ── 玻璃货架（Dropover 那种）────────────────────── */
+.shelf{
+  position:fixed;right:20px;bottom:20px;width:326px;max-height:52vh;z-index:70;
+  display:flex;flex-direction:column;overflow:hidden;border-radius:18px;
+  background:rgba(255,255,255,.58);
+  backdrop-filter:blur(26px) saturate(180%);
+  -webkit-backdrop-filter:blur(26px) saturate(180%);
+  border:1px solid rgba(255,255,255,.8);
+  box-shadow:0 16px 48px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.9);
+  transition:box-shadow .15s, border-color .15s, transform .15s;
+}
+.shelf.over{
+  border-color:var(--lime);
+  box-shadow:0 0 0 3px rgba(215,242,74,.75), 0 16px 48px rgba(0,0,0,.2);
+  transform:scale(1.012);
+}
+.shelf.folded .shelfbody,.shelf.folded .shelffoot{display:none}
+.shelfhead{display:flex;align-items:center;gap:8px;padding:0}  /* 容器要贴着那颗球，不留壳 */
+.shelfhead b{font-size:12.5px}
+.shelfhead .k{flex:1}
+.shelfbody{flex:1;overflow:auto;padding:0 10px 8px;min-height:44px}
+.shelffoot{display:flex;gap:6px;padding:0 10px 10px}
+.sitem{
+  background:rgba(255,255,255,.86);border:1px solid rgba(0,0,0,.05);border-radius:10px;
+  padding:7px 9px;margin-bottom:5px;font-size:12px;cursor:grab;
+  display:flex;gap:7px;align-items:flex-start;
+}
+.sitem:hover{border-color:rgba(0,0,0,.16)}
+.sitem .ic{flex:none}
+.sitem .tx{flex:1;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.sitem .x{flex:none;color:#b6bbc6;font-size:14px;line-height:1;cursor:pointer}
+.sitem .x:hover{color:#c0392b}
+.shelfempty{color:var(--dim);font-size:11.5px;padding:12px 4px;text-align:center}
+
+/* ── 接入抽屉 ── */
+.drawer{position:fixed;right:0;top:0;bottom:0;width:420px;max-width:92vw;background:var(--surface);
+  border-left:1px solid var(--line);z-index:100;display:flex;flex-direction:column;box-shadow:-14px 0 44px rgba(0,0,0,.1)}
+.dhead{display:flex;justify-content:space-between;align-items:center;padding:15px 17px;border-bottom:1px solid var(--line)}
+.dbody{flex:1;overflow:auto;padding:15px 17px 40px}
+.sec{border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:10px}
+.sec h3{margin:0 0 3px;font-size:13.5px;display:flex;align-items:center;gap:8px}
+.sec .d{color:var(--dim);font-size:11.5px;margin-bottom:9px;line-height:1.55}
+.dot{width:7px;height:7px;border-radius:50%;background:#dbdee4;flex:none}
+.dot.on{background:var(--ok)}
+.fld{margin-bottom:8px}
+.fld label{display:block;font-size:11px;color:var(--dim);margin-bottom:2px}
+.fld input{width:100%;font-size:12.5px;padding:8px 10px}
+.fld .hint{font-size:10.5px;color:#a2a8b4;margin-top:2px;line-height:1.45}
+
+/* ── 知识视图（内容栏里的卡片/表格）── */
+.kbwrap{flex:1;overflow:auto;padding:62px 30px 30px;max-width:840px;width:100%;margin:0 auto}
+/* ⚠️⚠️ 没有这一条，`.kbwrap` 的 `flex:1;overflow:auto` 就是**一句空话**：
+   它爸 `#kbmount` 是普通块，会跟着内容一起长高（实测 1704px），
+   而 `body` 是 `overflow:hidden` ⇒ 多出来的部分**直接被裁掉，滚不动**。
+   症状是"所有主页面都不能滚了" —— 内容一长就露馅，短的时候完全看不出来。 */
+#m-kb{min-height:0}
+#kbmount{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px}
+.card .m{color:var(--dim);font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:13px;flex-wrap:wrap}
+.row input{flex:1;min-width:200px}
+.badge{background:#eef0f4;color:#4a5468;border-radius:5px;padding:1px 6px;font-size:10.5px}
+/* 手写条目 —— 读起来要一眼能和"聚出来的/抓出来的"分开 */
+.badge.bman{background:var(--lime);color:var(--lime-ink)}
+.mrow{display:flex;align-items:center;gap:8px;padding:4px 0;border-top:1px solid var(--line2);font-size:12.5px}
+.mrow:first-of-type{border-top:0}
+.mrow .k{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mrow .xdel{flex:none;background:none;border:0;color:var(--dim);font-size:13px;line-height:1;padding:4px 6px;border-radius:7px}
+.mrow .xdel:hover{background:#fdecec;color:#b3261e}
+.kind{font-size:10.5px;padding:1px 7px;border-radius:5px;font-weight:640}
+.k-延伸{background:#e6f7ee;color:#0b7a4d}
+.k-缺口{background:#fdf1da;color:#9a6a00}
+.k-重访{background:#eee8fd;color:#5b3fb5}
+.chk{width:16px;height:16px;accent-color:#15171c;cursor:pointer;vertical-align:middle}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+td,th{padding:6px 7px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:500;font-size:11px}
+pre{white-space:pre-wrap;font-size:11.5px;color:#3c4353;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.bar{height:9px;background:var(--lime);border-radius:3px;display:inline-block;vertical-align:middle}
+
+/* ── 主动式页面 ── */
+.prow{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line2)}
+.prow:last-child{border-bottom:0}
+.prow .pc{flex:1}
+.num{width:74px;
+}
+/* ⚠️ time 类型不能和数字输入同宽 —— 74px 装不下，显示会挤成一团（看起来像别的值）*/
+input[type=time].num{width:116px}
+.num{width:74px;background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-size:12.5px}
+.sw{position:relative;flex:none;width:42px;height:24px;display:block}
+.sw.big{width:52px;height:30px}
+.sw input{position:absolute;opacity:0;width:0;height:0}
+.sw span{position:absolute;inset:0;border-radius:99px;background:#dcdfe6;transition:.16s;cursor:pointer}
+.sw span:before{content:'';position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.16s}
+.sw.big span:before{width:24px;height:24px}
+.sw input:checked + span{background:var(--lime)}
+.sw input:checked + span:before{transform:translateX(18px)}
+.sw.big input:checked + span:before{transform:translateX(22px)}
+.push{border-left:2px solid var(--lime);padding:2px 0 2px 10px;margin-bottom:11px}
+.push .t{font-weight:600;font-size:13px}
+.push .b{font-size:12.5px;color:#3c4353;margin:3px 0}
+
+
+
+/* ══════════════════════════════════════════════════════════
+   栏内的两个区：上=维护，下=核心（离手指近）
+   ══════════════════════════════════════════════════════════ */
+.shead{display:flex;align-items:center;justify-content:space-between;padding:0 8px 12px}
+.shead .brand{padding:0}
+.spacer{flex:1;min-height:8px}
+.topzone,.thumbzone{display:flex;flex-direction:column;gap:1px}
+.zonehint{font-size:9.5px;letter-spacing:.06em;color:var(--dim);padding:9px 9px 3px;text-transform:uppercase}
+.nv.core{padding:9px 9px;font-size:13.5px}
+.side .nv:hover{background:color-mix(in srgb, var(--tint) 12%, #fff)}
+.side .nv.on{background:color-mix(in srgb, var(--tint) 72%, #14161c);color:#fff}
+.side.blend .nv.on{background:#1d2026}
+.srcname{font-size:10.5px;color:var(--dim);padding:8px 9px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.colbtn{flex:none;width:22px;height:22px;line-height:1;border:0;border-radius:8px;color:var(--dim);
+  background:rgba(255,255,255,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);font-size:13px}
+.colbtn:hover{background:#fff;color:var(--ink)}
+body.rail-off .side{display:none}
+body.rec-off .dash{display:none}
+/* ⚠️ 导航改成注册表生成之后，被淡出的那一块是 `.navscroll`（不是 `.thumbzone`）——
+   漏了这一条的症状是：扇区展开时**整栏导航照样亮着**，和半透明扇区叠在一起看不清。
+   是 verify-ui 抓到的那条 `.thumbzone` 找不到元素才暴露的。 */
+.navscroll,.topzone,.srcname{transition:opacity .18s}
+/* ⚠️ 扇区和「栏内核心导航」想占的是同一块左下角。
+   两拨固定元素抢同一块地方时，最先坏的是控件 —— 图上那团乱就是这么来的。
+   展开时导航让开（连点击一起让），收起时原样回来。 */
+body.fanopen .navscroll,body.fanopen .topzone,body.fanopen .srcname{opacity:0;pointer-events:none}
+
+/* ⚠️ 钉在 `.main` 里（见 app.html 的注释）—— 所以是 absolute 不是 fixed。
+   `left:10/top:10` 现在指"内容区左上角"，不管左栏收没收起来都是同一个答案。 */
+.restorebar{position:absolute;left:10px;top:10px;z-index:80;display:flex;gap:5px;padding:5px;border-radius:13px;
+  background:rgba(255,255,255,.62);backdrop-filter:blur(22px) saturate(180%);
+  -webkit-backdrop-filter:blur(22px) saturate(180%);
+  border:1px solid rgba(255,255,255,.85);box-shadow:0 10px 28px rgba(0,0,0,.13)}
+.rsb{width:27px;height:27px;border:0;border-radius:9px;background:none;color:var(--dim);font-size:14px}
+.rsb:hover{background:rgba(0,0,0,.06);color:var(--ink)}
+/* ⚠️ 只收起「记录」栏时，来源栏**还在**，而它左上角就是 logo —— 恢复条本来也在
+   left:10px/top:10px ⇒ **正好压在 logo 上**（读者原话：「会跟 logo 那里打架」）。
+   来源栏在的时候，把它挪到来源栏右边：那里正好是被收起的记录栏空出来的地方。 */
+/* ⚠️ 这里原来是 `body:not(.rail-off) .restorebar{left:196px}` —— 一个"硬挪 196px"的补丁，
+   治的是它在旧位置压住 logo。现在它在 `.main` 里，那个偏移没意义了，删掉。
+   让位交给 `.flowbar` 那条规则（见下面「结构流」那节），它按恢复条的**实测宽度**
+   `--restorew`（paintCollapse 量的）往右让 —— 按钮个数不同宽度差一倍，
+   写死一个数必然在另一种情况下又不准。 */
+
+/* ══════════════════════════════════════════════════════════
+   来源：左下角一颗按钮 → 点开在 90° 扇区里弹出来
+   ⚠️ 位置用 left/bottom 加 translate 算，**不用 rotate 摆一圈** ——
+      旋转会让每个瓦片自己也跟着转过去，字是歪的。
+      这里只把「圆心」定在按钮中心，半径和角度换算成 x/y 偏移。
+   ══════════════════════════════════════════════════════════ */
+/* ── 全局 c4：一颗药丸 + 一个输入框。⚠️ 位置在来源那颗**上面**，
+   两者都是 fixed 左下角，摆一起会互相压住（读者报过"一类固定元素抢同一块地方时，
+   最先坏的就是控件"）。所以 c4 往上挪一层，不和来源抢。 ── */
+.c4pill{position:fixed;left:19px;bottom:84px;z-index:96;width:50px;height:30px;border-radius:999px;
+  display:grid;place-items:center;cursor:pointer;border:1px solid rgba(255,255,255,.55);
+  background:rgba(255,255,255,.72);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  box-shadow:0 8px 22px rgba(20,26,45,.16)}
+.c4pill b{font-size:12.5px;letter-spacing:.4px;font-weight:600;color:#12161d}
+.c4pill:hover{transform:translateY(-1px);box-shadow:0 12px 28px rgba(20,26,45,.22)}
+.c4modal{position:fixed;inset:0;z-index:1200;background:rgba(12,14,20,.42);
+  display:flex;align-items:flex-start;justify-content:center;padding-top:14vh}
+.c4modal[hidden]{display:none}
+.c4box{width:min(720px,92vw);border-radius:16px;overflow:hidden;
+  background:rgba(20,22,28,.94);border:1px solid rgba(255,255,255,.16);
+  box-shadow:0 30px 80px rgba(0,0,0,.5);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}
+.c4hd{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.10)}
+.c4hd b{color:#d7f24a;font-size:14px;letter-spacing:.4px}
+.c4hd .k{color:rgba(233,236,244,.62);font-size:12px;flex:1}
+.c4x{border:0;background:transparent;color:rgba(233,236,244,.7);cursor:pointer;font-size:13px}
+.c4x:hover{color:#fff}
+.c4box input{width:100%;border:0;outline:none;background:transparent;color:#e9ecf4;
+  font-size:17px;padding:16px 16px;font-family:inherit}
+.c4box input::placeholder{color:rgba(233,236,244,.4)}
+.c4out{padding:0 16px 16px;color:rgba(233,236,244,.8);font-size:13px;line-height:1.7}
+.c4out b{color:#eef2f8}
+.c4out .k{color:rgba(233,236,244,.55)}
+.c4out .row{gap:8px;flex-wrap:wrap;margin-top:10px}
+.c4out button.go{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#e9ecf4;
+  border-radius:9px;padding:6px 12px;font-size:12.5px;cursor:pointer}
+.c4out button.go:hover{border-color:rgba(215,242,74,.6)}
+.c4out button.go:disabled{opacity:.4;cursor:default}
+
+.fan{position:fixed;left:15px;bottom:15px;z-index:96;width:58px;height:58px}
+.fanbtn{position:absolute;inset:0;width:58px;height:58px;border-radius:50%;cursor:pointer;
+  border:1px solid rgba(255,255,255,.85);
+  background:linear-gradient(150deg,rgba(255,255,255,.9),rgba(244,246,240,.72));
+  backdrop-filter:blur(26px) saturate(190%);-webkit-backdrop-filter:blur(26px) saturate(190%);
+  box-shadow:0 12px 30px rgba(20,26,45,.20), inset 0 1px 0 rgba(255,255,255,.95);
+  display:grid;place-items:center;font-size:22px;line-height:1;
+  transition:transform .34s cubic-bezier(.22,1.15,.36,1), box-shadow .2s}
+.fanbtn:hover{box-shadow:0 14px 36px rgba(20,26,45,.26), inset 0 1px 0 rgba(255,255,255,.95)}
+.fan.open .fanbtn{transform:rotate(135deg)}
+/* 展开时给整屏压一层极其轻的雾：扇区浮起来，后面的内容退下去 */
+.fanveil{position:fixed;inset:0;z-index:95;background:rgba(18,20,28,.10);
+  backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);opacity:0;pointer-events:none;
+  transition:opacity .22s}
+body.fanopen .fanveil{opacity:1;pointer-events:auto}
+
+/* 0×0 的圆点 = 扇心（对齐按钮正中心）*/
+.fanitems{position:absolute;left:29px;bottom:29px;width:0;height:0}
+.fani{position:absolute;left:0;bottom:0;width:46px;height:46px;border-radius:50%;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  border:1px solid rgba(255,255,255,.8);
+  background:rgba(255,255,255,.6);
+  backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.95), 0 6px 18px rgba(20,26,45,.13);
+  opacity:0;pointer-events:none;
+  /* 收起来时缩回扇心，展开时沿自己的角度滑出去 */
+  transform:translate(calc(-50% + 0px), calc(50% - 0px)) scale(.22);
+  transition:transform .38s cubic-bezier(.22,1.15,.36,1), opacity .2s, background .14s, box-shadow .14s;
+  transition-delay:calc(var(--i, 0) * 26ms)}
+.fan.open .fani{opacity:1;pointer-events:auto;
+  transform:translate(calc(-50% + var(--x, 0px)), calc(50% - var(--y, 0px))) scale(1)}
+.fani .g{font-size:16px;line-height:1}
+.fani i{font-style:normal;font-size:8.5px;color:var(--dim);max-width:100%;padding:0 2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fani:hover{background:rgba(255,255,255,.95)}
+/* ⚠️ 选中态用瓦片自己的 --c，不能用 --tint —— 后者正是「选来源」要改的那个东西，
+   拿它给自己上色 = 选完所有瓦片长得一模一样。 */
+.fani.on{background:color-mix(in srgb, var(--c) 30%, #fff);
+  border-color:color-mix(in srgb, var(--c) 62%, transparent);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--c) 42%, transparent), inset 0 1px 0 rgba(255,255,255,.95)}
+.fani.on i{color:var(--ink);font-weight:640}
+.fan.open .fani.off{opacity:.45}   /* ⚠️ 必须挂在 .fan.open 上。
+   写成裸的 .fani.off 会盖过收起态的 opacity:0 —— 表现是「收回了，
+   但有三颗瓦片还悬在那儿」，而它们正好是没配好的那三颗。 */
+/* 融合 = 最核心那一格：稍大、带一圈自己的光 */
+.fani.core{width:54px;height:54px;background:linear-gradient(150deg,#fff,#eef2e6)}
+.fani.core .g{font-size:20px}
+.fan.open .fani.core{transform:translate(calc(-50% + var(--x, 0px)), calc(50% - var(--y, 0px))) scale(1);
+  box-shadow:0 0 0 3px rgba(215,242,74,.55), inset 0 1px 0 rgba(255,255,255,.95), 0 8px 22px rgba(20,26,45,.16)}
+
+/* ══════════════════════════════════════════════════════════
+   货架 → 右下角，和来源那颗**同一个模式**：一颗圆按钮，点开往上长
+   ⚠️ 上一版是个 173px 宽的横条，正好压在语音输入条的右端 ——
+      「挪到右下角」只解决了它压记录栏，没解决它压输入条。
+      改成 58px 的圆按钮之后，右下角只剩一颗球，冲突从"必然"变成"要算一下"。
+   ══════════════════════════════════════════════════════════ */
+/* ⚠️⚠️ 下面 width/background/border/box-shadow **必须显式重置**。
+   更早还有一条同名的 `.shelf{...}`（同特异型），我没写的属性会**原样留下** ——
+   实测漏出来的是一块 326×78 的白玻璃浮在右下角，而 `#shelfbody` 明明是 display:none。
+   「我没改的那部分」一直在偷偷生效：改样式时**没重声明的属性等于没动**。 */
+.shelf{position:fixed;right:18px;bottom:18px;z-index:74;width:auto;display:flex;flex-direction:column-reverse;
+  align-items:flex-end;gap:7px;max-height:74vh;
+  background:none;border:0;border-radius:0;box-shadow:none;overflow:visible}
+.shelfpill{position:relative;width:58px;height:58px;border-radius:50%;cursor:pointer;flex:none;
+  border:1px solid rgba(255,255,255,.85);display:grid;place-items:center;font-size:21px;line-height:1;
+  background:linear-gradient(150deg,rgba(255,255,255,.94),rgba(244,246,240,.78));
+  backdrop-filter:blur(26px) saturate(190%);-webkit-backdrop-filter:blur(26px) saturate(190%);
+  box-shadow:0 12px 30px rgba(20,26,45,.20), inset 0 1px 0 rgba(255,255,255,.95);
+  transition:width .2s, border-radius .2s, box-shadow .15s}
+.shelfpill b,.shelfpill i{display:none}
+.shelf:not(.folded) .shelfpill{width:auto;height:44px;border-radius:999px;padding:0 16px;gap:9px;
+  display:flex;align-items:center;font-size:15px}
+.shelf:not(.folded) .shelfpill b{display:block;font-size:13px;font-weight:640}
+.shelf:not(.folded) .shelfpill i{display:block;font-style:normal;font-size:11px;color:var(--dim);max-width:130px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shelfpill .spico{font-size:20px}
+.shelf:not(.folded) .shelfpill .spico{font-size:15px}
+/* 有几段就挂在角上 —— 收起来时也要看得见，不然"收着但里面有东西"和"空的"长得一样 */
+.shelfbadge{position:absolute;right:-3px;top:-3px;min-width:20px;height:20px;border-radius:999px;
+  background:var(--lime);color:var(--lime-ink);font-size:11px;font-weight:700;display:grid;place-items:center;
+  padding:0 5px;box-shadow:0 2px 7px rgba(0,0,0,.24)}
+.shelf:not(.folded) .shelfbadge{display:none}
+.shelf.over .shelfpill{border-color:var(--lime);box-shadow:0 0 0 3px rgba(215,242,74,.85), 0 12px 30px rgba(20,26,45,.22)}
+.shelfbody,.shelffoot{width:324px;background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.82);
+  backdrop-filter:blur(26px) saturate(185%);-webkit-backdrop-filter:blur(26px) saturate(185%);
+  box-shadow:0 16px 46px rgba(18,22,40,.16)}
+.shelfbody{flex:1;overflow:auto;padding:9px;border-radius:16px;min-height:52px}
+.shelffoot{display:flex;gap:6px;padding:9px;border-radius:16px}
+.sitem{background:rgba(255,255,255,.9);border:1px solid rgba(0,0,0,.05);border-radius:10px;
+  padding:7px 9px;margin-bottom:5px;font-size:12px;cursor:grab;display:flex;gap:7px;align-items:flex-start}
+.sitem:hover{border-color:rgba(0,0,0,.16)}
+.sitem .ic{flex:none}
+.sitem .tx{flex:1;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.sitem .x{flex:none;color:#b6bbc6;font-size:14px;line-height:1;cursor:pointer}
+.sitem .x:hover{color:#c0392b}
+.shelfempty{color:var(--dim);font-size:11.5px;padding:10px 4px;text-align:center}
+/* 一拖起来，货架就亮起来 —— 收起时它只有 58×58，拖过去差几个像素就什么都不发生，
+   而"差几个像素"和"这个功能不能用"在界面上长得一模一样（读者就是这么报的）。
+   JS 在 dragstart 里会把它展开，这里再补一层"我现在是落点"的视觉。 */
+body.dragging .shelf{border-color:var(--lime);
+  box-shadow:0 0 0 3px rgba(215,242,74,.55), 0 18px 50px rgba(0,0,0,.22)}
+body.dragging .shelf.folded{transform:scale(1.08);border-color:var(--lime);
+  box-shadow:0 0 0 4px rgba(215,242,74,.7), 0 14px 34px rgba(0,0,0,.24)}
+/* 语音/对话/记录里的每一段都能拖 —— 光标要说得出这件事 */
+.vlog>.you,.vlog>.ai,#thread .msg,#loglist .item{cursor:grab}
+
+/* ══════════════════════════════════════════════════════════
+   语音 / 文字：光球与背景铺满，控件**浮**在上面
+   ══════════════════════════════════════════════════════════ */
+.orbbg{position:absolute;inset:0;z-index:0}
+#orb{width:100%;height:100%;display:block}
+/* ⚠️ 右边那 116px 是**留给右下角那颗货架球 + 问号**的。
+   不留的话输入条会一直顶到最右边，而那串"球 + ?"正好压在上头 ——
+   实测：球+问号占 1327..1385，输入条到 1349，重了 22px。
+   这是**留边**，不是把球挪开：两个东西抢同一个角，总有一方要让出宽度。 */
+.vfloat{position:relative;z-index:2;height:100%;display:flex;flex-direction:column;
+  justify-content:flex-end;gap:9px;padding:60px 116px 18px 26px;min-height:0}
+/* ⚠️ 输入条、记录框都收窄到 760 并居中 —— 满宽的条会一直顶到右下角，
+   而右下角现在是货架那颗球。这是**留边**，不是把球挪开。 */
+.vfloat>*{width:100%;max-width:760px;margin-left:auto;margin-right:auto}
+.vstate{align-self:center;font-size:12px;color:var(--ink);padding:7px 16px;margin-bottom:2px}
+.vlog{height:136px;overflow:auto;padding:11px 15px;font-size:13px}
+.vbar{display:flex;align-items:center;gap:9px;padding:10px 12px}
+.mic{width:46px;height:46px;flex:none;border-radius:50%;border:1px solid rgba(255,255,255,.8);
+  background:rgba(255,255,255,.7);font-size:18px;display:grid;place-items:center}
+.mic.live{background:var(--lime);border-color:transparent;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(215,242,74,.75)}50%{box-shadow:0 0 0 13px rgba(215,242,74,0)}}
+.vbtn{background:rgba(255,255,255,.66);border:1px solid rgba(255,255,255,.8);border-radius:11px;padding:10px 12px;white-space:nowrap}
+.vtype{flex:1}
+.vtype input{width:100%}
+input[type=text]{background:rgba(255,255,255,.66);border:1px solid rgba(255,255,255,.84);
+  border-radius:11px;padding:10px 13px;outline:none}
+input[type=text]:focus{background:#fff;border-color:var(--ink)}
+.vhint{padding:0 6px 4px;color:var(--dim);font-size:11px;text-align:center}
+
+.thread{flex:1;overflow:auto;padding:64px 116px 10px 26px;max-width:880px;width:100%;margin:0 auto;min-height:0}
+.msg{margin-bottom:12px;display:flex;gap:9px}
+.msg .who{flex:none;width:24px;text-align:center;font-size:14px;line-height:1.6}
+.msg .body{flex:1;border-radius:16px;padding:12px 15px;white-space:pre-wrap;
+  background:rgba(255,255,255,.56);border:1px solid rgba(255,255,255,.78);
+  backdrop-filter:blur(20px) saturate(175%);-webkit-backdrop-filter:blur(20px) saturate(175%);
+  box-shadow:0 8px 24px rgba(18,22,40,.08), inset 0 1px 0 rgba(255,255,255,.9)}
+.msg.me .body{background:rgba(226,236,255,.58);border-color:rgba(255,255,255,.8)}
+.msg[draggable=true]{cursor:grab}
+.msg .srcs{font-size:11px;color:var(--dim);margin-top:6px}
+.tbar{display:flex;gap:8px;padding:10px 12px;max-width:760px;width:100%;margin:0 auto 18px}
+.tbar input{flex:1;border:0;background:rgba(255,255,255,.5)}
+.tbar input:focus{background:rgba(255,255,255,.92)}
+button.go{background:var(--lime);color:var(--lime-ink);border:1px solid transparent;border-radius:11px;padding:10px 18px;font-weight:640}
+button.ghost{background:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.85);border-radius:11px;padding:9px 14px}
+button.mini{background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.85);border-radius:9px;padding:4px 10px;font-size:11.5px}
+.flowfoot{display:flex;gap:9px;align-items:center;padding:10px 14px;margin:0 26px 16px;border-radius:16px}
+
+/* 主动页：功能 / 设置 两块 */
+.secH{display:flex;align-items:baseline;gap:9px;margin:2px 2px 9px}
+.secH b{font-size:14.5px}
+.secH .k{font-size:11px}
+
+/* 抽屉也用玻璃（内容多，所以留个更实的底，不然输不清） */
+.drawer{background:rgba(255,255,255,.9);backdrop-filter:blur(30px) saturate(180%);
+  -webkit-backdrop-filter:blur(30px) saturate(180%)}
+
+/* ══════════════════════════════════════════════════════════
+   玻璃：一处配方，多处复用
+   ══════════════════════════════════════════════════════════ */
+.glass{background:var(--g-bg);border:1px solid var(--g-bd);border-radius:18px;
+  backdrop-filter:blur(24px) saturate(185%);-webkit-backdrop-filter:blur(24px) saturate(185%);
+  box-shadow:var(--g-shadow)}
+.pill{border-radius:999px;background:var(--g-bg);border:1px solid var(--g-bd);
+  backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:0 6px 20px rgba(18,22,40,.08), inset 0 1px 0 rgba(255,255,255,.9)}
+.vpane,.tpane,.fpane{position:relative;overflow:hidden}
+/* ⚠️ 珍珠光球本身是白的 —— 放在浅底上，它和背景的对比度接近 1，
+   图上看着就是「一片白」。这不是球坏了，是**底太亮**。
+   所以语音这一屏做暗舞台，玻璃浮在上面才成立。 */
+/* ⭐ 读者 2026-10-10：「语音的背景改为这张图作为默认，另外设置里要对于**语音的背景、
+   文字的背景**可以更改才可以」。
+   ⇒ 背景走 CSS 变量（`--bg-voice` / `--bg-text`），设置页往 `documentElement` 上写值。
+   ⚠️⚠️ **图片上面必须压一层暗**：玻璃面板和上面的字都是浅色的，
+      直接铺照片会让它们读不出来 —— 而那正是这个项目栽过好几次的那个坑（对比度接近 1）。
+      压暗层放在**最上面**（CSS 里靠前的先画在上面），所以它盖得住照片。 */
+.vpane{background:
+  linear-gradient(rgba(9,11,15,.46), rgba(9,11,15,.66)),
+  var(--bg-voice, url('/ui/assets/bg-voice.jpg')) center/cover no-repeat,
+  linear-gradient(162deg,#15181f,#0c0e13 60%,#090a0d)}
+/* 文字那一屏同理，但没有默认图（保持原来的干净底） */
+.tpane{background:
+  linear-gradient(rgba(245,246,248,.90), rgba(245,246,248,.96)),
+  var(--bg-text, none) center/cover no-repeat,
+  linear-gradient(#f3f4f6,#eef0f3)}
+
+/* ── 暗舞台上的玻璃：同一套配方，换成白低透明的版本 ── */
+.vpane .glass,.vpane .pill{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.24);
+  box-shadow:0 12px 36px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.20)}
+.vpane .vlog,.vpane .vstate,.vpane .vhint{color:#e9ecf4}
+.vpane .vlog .you,.vpane .vlog .you b{color:#c3c9d8}
+.vpane .vhint{color:rgba(255,255,255,.52)}
+.vpane .mic,.vpane .vbtn{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.22);color:#fff}
+.vpane .mic.live{background:var(--lime);color:var(--lime-ink);border-color:transparent}
+.vpane input[type=text]{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.20);color:#fff}
+.vpane input[type=text]::placeholder{color:rgba(255,255,255,.42)}
+.vpane input[type=text]:focus{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.55)}
+.vpane select.vbtn option{color:#16181d}
+
+/* ── 文字那一屏：底也压深一点，不然白玻璃浮不起来 ── */
+.tpane{padding-right:116px}
+.tpane{background:
+  radial-gradient(100% 70% at 78% 4%, rgba(215,242,74,.20), transparent 60%),
+  radial-gradient(95% 80% at 12% 98%, rgba(122,158,255,.20), transparent 62%),
+  linear-gradient(158deg,#eceef2,#dde2e7)}
+
+/* ══════════════════════════════════════════════════════════
+   结构流：Figma 那种点阵画布（可缩放）+ 三种版式
+   ⚠️ 点阵**不跟着一起 scale** —— 它是按当前缩放**重画**的：
+      background-size 跟着 z 变、background-position 跟着位移变。
+      直接用 transform:scale 会把它放大成一坨大圆饼，缩小时又糊成一片。
+      Figma 就是这么做的，也是唯一看起来对的做法。
+   ══════════════════════════════════════════════════════════ */
+.fpane{display:flex;flex-direction:column;min-height:0}
+/* ⚠️ 右边必须留出「右上角那三个缩略图」的宽度。
+   不然 `.modes`（absolute + z-index:20）会**整个盖住缩放按钮** ——
+   而它看起来一切正常，只是怎么点都没反应。
+   两个固定元素抢同一块地方时，最先坏的一定是控件。 */
+/* ⚠️ 左边那截是给「恢复条」让位的：恢复条钉在 .main 左上角（left:10），
+   而这一行也从左上角开始，不让位就是两个东西叠在一起（读者截图里「卡片」被压掉一半）。
+   宽度**量**出来（paintCollapse 写 `--restorew`），不写死 —— 条里 1 颗还是 2 颗按钮差一倍。 */
+.flowbar{display:flex;align-items:center;gap:12px;padding:14px 206px 8px calc(var(--restorew, 0px) + 18px);flex-wrap:wrap}
+.flowbar .k{flex:1;min-width:180px;text-align:center}
+.seg{display:inline-flex;background:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.8);
+  border-radius:11px;padding:3px;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+.seg button{border:0;background:none;border-radius:8px;padding:5px 12px;font-size:12.5px;color:var(--dim)}
+.seg button:hover{color:var(--ink)}
+.seg button.on{background:var(--ink);color:#fff}
+.zoomctl{display:inline-flex;align-items:center;gap:2px;padding:3px 4px;border-radius:11px}
+.zoomctl button{border:0;background:none;border-radius:8px;width:28px;height:26px;font-size:13px;color:var(--dim)}
+.zoomctl button:hover{background:rgba(0,0,0,.06);color:var(--ink)}
+.zoomctl button[data-z="fit"]{width:auto;padding:0 9px;font-size:11.5px}
+.zoomctl b{font-size:11px;color:var(--dim);min-width:40px;text-align:center;font-variant-numeric:tabular-nums}
+
+.flowcanvas{flex:1;position:relative;overflow:hidden;min-height:0;cursor:grab;
+  background:linear-gradient(158deg,#fbfbf9,#f0f2ee)}
+.flowcanvas.panning{cursor:grabbing}
+.flowgrid{position:absolute;inset:0;pointer-events:none;
+  background-image:radial-gradient(circle, rgba(38,46,64,.30) 1.1px, transparent 1.2px);
+  background-size:var(--gz,26px) var(--gz,26px);
+  background-position:var(--gpx,0px) var(--gpy,0px)}
+.flowworld{position:absolute;left:0;top:0;transform-origin:0 0;
+  transform:translate(var(--px,60px),var(--py,40px)) scale(var(--z,1))}
+.flowlist{padding:10px;width:520px}
+
+/* ── 版式 1：卡片（默认）—— 竖排 + 连线 ── */
+.flowlist{padding:14px 4px 60px}
+.blk{display:flex;gap:11px;background:rgba(255,255,255,.82);border:1px solid var(--line);border-radius:12px;
+  padding:10px 12px;margin-bottom:2px;cursor:pointer;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.blk.sel{border-color:var(--ink);box-shadow:0 0 0 3px rgba(22,24,29,.10)}
+.blk.drag{opacity:.4}
+.blk .kb{flex:none;display:flex;flex-direction:column;align-items:center;gap:1px;width:56px}
+.blk .kb .ic{font-size:16px}
+.blk .kb .nm{font-size:10px;color:var(--dim);text-align:center;line-height:1.2}
+.blk .c{flex:1;min-width:0}
+.blk .c .txt{font-size:13px;outline:none;min-height:20px}
+.blk .c .txt:empty:before{content:attr(data-ph);color:#bdc2cc}
+.conn{height:12px;margin-left:38px;border-left:2px dashed #d9dde4}
+
+/* ── 版式 2：nuggets（Tuna 那种小方块阵）── */
+.lay-nuggets .flowlist,.lay-3d .flowlist{display:grid;padding:14px;width:max-content}
+/* ⚠️ 这里不能用 repeat(auto-fill,…)：容器是 width:max-content，
+   而 auto-fill 要**先知道容器多宽**才能决定几列 —— 两者互相等，
+   结果是塌成 1 列（而它看起来只是"排得有点窄"）。给死列数。 */
+.lay-nuggets .flowlist{grid-template-columns:repeat(3,196px);gap:12px}
+.lay-nuggets .conn,.lay-3d .conn{display:none}
+.lay-nuggets .blk{flex-direction:column;align-items:stretch;gap:7px;width:196px;min-height:112px;margin:0}
+.lay-nuggets .blk .kb{flex-direction:row;width:auto;gap:6px;align-items:center}
+.lay-nuggets .blk .kb .nm{font-size:11.5px;color:var(--ink);font-weight:600}
+.lay-nuggets .blk .c .txt{font-size:12px;max-height:56px;overflow:hidden}
+.lay-nuggets .blk:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(20,26,45,.14)}
+
+/* ── 版式 3：3D（斜面上的立体排布）── */
+.lay-3d .flowlist{grid-template-columns:repeat(3,232px);gap:20px;padding:40px 20px 120px;
+  transform:perspective(1600px) rotateX(46deg) rotateZ(-9deg);transform-style:preserve-3d}
+.lay-3d .blk{flex-direction:column;width:232px;min-height:118px;margin:0;
+  box-shadow:0 26px 44px rgba(20,26,45,.18);border-color:rgba(255,255,255,.9)}
+.lay-3d .blk .kb{flex-direction:row;width:auto;gap:6px;align-items:center}
+.lay-3d .blk .kb .nm{font-size:11.5px;color:var(--ink);font-weight:600}
+.lay-3d .blk.sel{box-shadow:0 0 0 3px rgba(215,242,74,.75), 0 30px 50px rgba(20,26,45,.24)}
+.lay-3d .blk .txt{font-size:12px}
+
+/* 块上的来源标签 —— 一个块属于哪个来源，跑的时候按它过滤 */
+.bsrc{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:1px 8px;font-size:10.5px;
+  border:1px solid color-mix(in srgb, var(--c) 48%, transparent);
+  background:color-mix(in srgb, var(--c) 13%, #fff);
+  color:color-mix(in srgb, var(--c) 72%, #101318)}
+.bsrc.inherit{border-style:dashed;opacity:.72}
+.tags{display:flex;gap:5px;margin-top:5px;flex-wrap:wrap;align-items:center}
+.tag{font-size:10px;padding:1px 6px;border-radius:4px;background:#eef0f4;color:#4a5468}
+.tag.notion{background:#e9f3ec;color:#20633b}
+.tag.wecom{background:#eaf2fd;color:#1c4f96}
+.tag.feishu{background:#f0edfd;color:#4b3a9c}
+.tag.kb{background:#fdf3e2;color:#8a5b06}
+/* ⚠️ 默认版式里 `.flowlist` 是 `min-width:900px` 的块级容器，而 `.addrow` 是个**普通块**
+   ⇒ 它会横着铺满 900px，变成一条巨大的虚线带（读者原话：「添加一块看起来太大了」）。
+   改成一枚贴着左上角的小按钮：不要 width:100%，用 inline-flex 让它缩到文字那么宽。 */
+.addrow{display:inline-flex;width:auto;margin:6px 0 0;border:1px dashed var(--line);border-radius:999px;
+  padding:7px 13px;color:var(--dim);font-size:12px;background:rgba(255,255,255,.5)}
+.addrow:hover{border-color:var(--ink);color:var(--ink)}
+.lay-nuggets .addrow,.lay-3d .addrow{margin:0;width:196px;min-height:112px;display:grid;place-items:center}
+.lay-3d .addrow{width:232px;min-height:118px}
+.flowempty{color:var(--dim);font-size:12.5px;padding:22px 0;text-align:center}
+
+/* 弱相关提示 —— 答案照给，但要告诉你"这条不太靠得住" */
+.weakchip{display:flex;align-items:center;gap:8px;margin:7px 0 0;padding:7px 11px;border-radius:11px;
+  background:rgba(253,241,218,.9);border:1px solid rgba(215,175,90,.5);font-size:11.5px;color:#8a5b06}
+.weakchip button{border:1px solid rgba(138,91,6,.4);background:rgba(255,255,255,.8);border-radius:8px;
+  padding:3px 10px;font-size:11.5px;color:#8a5b06}
+.webnote{font-size:11px;color:#1c4f96;background:rgba(234,242,253,.9);border:1px solid rgba(28,79,150,.28);
+  border-radius:9px;padding:5px 10px;margin-bottom:7px}
+.webnote a{color:#1c4f96}
+
+/* ── 一句话反馈条（toast）──────────────────────────────────
+   凡是"点了要等一会儿"的动作都必须先说话 —— 读者报的
+   「点击接入和同步没有反馈」就是缺了这个。 */
+.toast{position:fixed;left:50%;bottom:34px;transform:translate(-50%,14px);z-index:300;
+  max-width:min(560px,86vw);padding:9px 16px;border-radius:12px;font-size:12.5px;line-height:1.5;
+  background:rgba(24,27,34,.90);color:#fff;box-shadow:0 14px 34px rgba(10,14,26,.30);
+  opacity:0;pointer-events:none;transition:opacity .18s, transform .18s}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast.bad{background:rgba(150,42,32,.94)}
+.toast.good{background:rgba(20,96,62,.94)}
+
+/* ── 「笔记里没有」的弹窗 ── */
+.modal{position:fixed;inset:0;z-index:200;display:grid;place-items:center;
+  background:rgba(16,18,26,.34);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+.mbox{width:min(470px,92vw);padding:22px 24px 16px;border-radius:20px;
+  background:rgba(255,255,255,.90);border:1px solid rgba(255,255,255,.9);
+  box-shadow:0 28px 70px rgba(12,16,30,.32)}
+.mtitle{font-size:16px;font-weight:660;margin-bottom:7px}
+.mbody{font-size:12.5px;color:#4a5468;line-height:1.7;margin-bottom:15px}
+.mbody code{background:#eef0f4;padding:1px 5px;border-radius:5px}
+.macts{display:flex;gap:9px}
+/* ── 同步弹窗：一行一个来源（状态 + 同步按钮 + 结果写回同一行）── */
+.syncrow{display:grid;grid-template-columns:26px 1fr auto;gap:6px 10px;align-items:center;
+  padding:8px 2px;border-bottom:1px solid var(--line)}
+.syncrow:last-child{border-bottom:0}
+.syncrow .si{font-size:16px;text-align:center}
+.syncrow .sc b{font-size:12.5px}
+.syncrow .sr{grid-column:2 / -1;white-space:pre-wrap;font-size:11px;line-height:1.55;margin:0}
+.sok,.sno{font-size:10.5px;margin-left:7px;padding:1px 7px;border-radius:999px}
+.sok{background:#e9f3ec;color:#20633b}
+.sno{background:#fdeee9;color:#8f3a24}
+.go.sm{padding:4px 12px;font-size:11.5px;border-radius:9px}
+.go[disabled]{opacity:.45;cursor:default}
+.mchk{display:flex;align-items:center;gap:7px;margin-top:13px;font-size:11.5px;color:var(--dim);cursor:pointer}
+
+/* ══════════════════════════════════════════════════════════
+   结构流：自由画布 + 有类型的端口 + 线
+   ══════════════════════════════════════════════════════════ */
+.qbtn{width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.85);
+  background:rgba(255,255,255,.7);font-weight:700;color:var(--dim);font-size:14px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.qbtn:hover{background:#fff;color:var(--ink);border-color:var(--ink)}
+
+/* 端口类型图例 —— 颜色 = 类型这件事以前只有 hover 的 title 说得出，等于没有。
+   （读者原话：「这些小点的功能绿色蓝色，意义是什么」。） */
+.plegend{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;
+  padding:0 14px 8px;font-size:10.5px;color:var(--dim)}
+.plegend b{display:inline-flex;align-items:center;gap:4px;font-weight:500;white-space:nowrap}
+.plegend i{width:9px;height:9px;border-radius:50%;background:#fff;
+  border:2.5px solid var(--c);display:inline-block;flex:none}
+
+/* 线在屏幕坐标里画 —— 缩小时不会细成一根头发 */
+#wires{position:absolute;inset:0;z-index:1;pointer-events:none;overflow:visible}
+#wires .wire{transition:stroke .12s}
+#wires .wire.hot{stroke:var(--lime);stroke-width:3.5}
+.flowworld{z-index:2}
+
+/* 自由摆放：卡片是绝对定位的，位置就是它的 x/y */
+.lay-default .flowlist{position:relative;width:max-content;min-width:900px;min-height:640px}
+.lay-default .blk{position:absolute;width:300px}
+.lay-nuggets .blk,.lay-3d .blk{position:static}
+.blk{position:relative;display:flex;gap:11px;align-items:flex-start}
+
+/* ── 端口 ── */
+.pcol{position:absolute;top:14px;bottom:14px;display:flex;flex-direction:column;justify-content:center;gap:9px;z-index:3}
+.pcol.in{left:-7px}
+.pcol.out{right:-7px}
+.port{position:relative;width:12px;height:12px;border-radius:50%;background:#fff;border:2.5px solid var(--c);
+  box-shadow:0 1px 4px rgba(0,0,0,.20);transition:transform .12s, box-shadow .12s, opacity .12s}
+/* ⚠️ 12px 的点太小：拖到一半脱手、点击式点到旁边一点，都变成「连不上」。
+   加一层**透明的**命中垫（视觉一点不变），点到它等于点到这颗端口。
+   只外扩 4px：同一列相邻端口中心相距 21px，再大就会互相压住、点谁都是它。 */
+.port::after{content:'';position:absolute;inset:-4px;border-radius:50%}
+.port:hover{transform:scale(1.45)}
+body.wiring .port.in{opacity:.3}
+body.wiring .port.in.ok{opacity:1;transform:scale(1.5);
+  box-shadow:0 0 0 5px color-mix(in srgb, var(--c) 34%, transparent), 0 1px 4px rgba(0,0,0,.2)}
+body.wiring .port.in.no{opacity:.10}
+
+/* ⭐ 选中发光 —— 整块亮起来，不是只描个边 */
+@keyframes selglow{
+  0%,100%{box-shadow:0 0 0 3px rgba(215,242,74,.85), 0 0 30px rgba(215,242,74,.30), 0 14px 30px rgba(20,26,45,.16)}
+  50%    {box-shadow:0 0 0 3px rgba(215,242,74,1),   0 0 54px rgba(215,242,74,.55), 0 14px 30px rgba(20,26,45,.16)}
+}
+.blk.sel{border-color:#c3de3f;z-index:6;animation:selglow 2.4s ease-in-out infinite}
+.blk.evt{background:rgba(243,240,255,.9);border-color:#d8d0f8}
+.tag.danger{background:#fdecea;color:#b3261e}
+.bstat{position:absolute;right:8px;bottom:6px;font-size:10px;padding:1px 7px;border-radius:999px;color:var(--dim)}
+.bstat.run{background:#eef3ff;color:#1c4f96}
+.bstat.ok{background:#e6f7ee;color:#0b7a4d}
+.bstat.bad{background:#fdecea;color:#b3261e}
+/* 第三种状态：**触发器**（事件块）。它不是"跑过的一步"，所以既不打绿勾也不打红叉 ——
+   ⚠️ 别把它并进 ok/bad 里：并进哪一边都是在说一件没发生的事。 */
+.bstat.trig{background:#f1f2f4;color:#6b7280}
+
+/* ── 3D：给卡片**厚度**，不是把平图斜过来 ──
+   ⚠️ 厚度**不能**靠 ::before 转 90° 立一面墙 —— 那面墙会转到背离镜头的一侧，
+      量出来一切正常（高 26px、matrix3d），而截图里什么也没有。
+      **静默失效**的又一种：它画了，只是画在了背面。
+   正解是用**平面内偏移的实心影子**：box-shadow 的偏移量是在元素自己的
+   （已经被 rotateX 过的）坐标系里算的 ⇒ 一叠偏移就自然成为侧面。
+   等距插画几十年都是这么做的，稳、不依赖 preserve-3d 的渲染差异。 */
+.lay-3d .blk{
+  box-shadow:
+    0 7px 0 -2px #b9c2ce,
+    0 14px 0 -4px #98a3b1,
+    0 15px 0 -4px rgba(20,26,45,.16),
+    0 42px 58px rgba(20,26,45,.30);
+}
+/* 顶面提亮，侧面才有"受光"的意思 */
+.lay-3d .blk::after{
+  content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(148deg,rgba(255,255,255,.9),rgba(255,255,255,0) 58%);
+}
+.lay-3d .blk.sel{
+  box-shadow:0 0 0 3px rgba(215,242,74,.95), 0 0 46px rgba(215,242,74,.5),
+    0 7px 0 -2px #b9c2ce, 0 14px 0 -4px #98a3b1, 0 42px 58px rgba(20,26,45,.3);
+  animation:none;
+}
+
+/* ── 帮助弹窗 ── */
+.mbox.wide{width:min(720px,94vw);max-height:86vh;overflow:auto}
+.hsec{margin-bottom:16px}
+.hsec h4{margin:0 0 7px;font-size:13.5px}
+.hsec p{margin:0 0 7px}
+.hsec table{border-collapse:collapse;font-size:12.5px}
+.hsec td{padding:4px 10px 4px 0;vertical-align:top;border-bottom:1px solid var(--line2)}
+.hsec td:first-child{white-space:nowrap;color:var(--dim)}
+.hsec .hint{font-size:11.5px;color:var(--dim);margin-top:6px}
+.hsec.warn{background:rgba(253,241,218,.7);border:1px solid rgba(215,175,90,.5);border-radius:12px;padding:11px 14px}
+
+/* ══════════════════════════════════════════════════════════
+   图标：手绘粗糙风（见 ui/icons.js）
+   ══════════════════════════════════════════════════════════ */
+.ic{display:inline-block;width:1.1em;height:1.1em;flex:none;vertical-align:-.17em;color:inherit}
+/* ⚠️ 按钮/导航里的图标是 flex item，靠 align-items:center 对齐；
+   行内的（写在文字里）靠 vertical-align。两处都要想，不然总有一处是歪的。 */
+.nv .ic{width:15px;height:15px}
+.thumb .ic{width:18px;height:18px}
+.fani .ic{width:16px;height:16px}
+.fani.core .ic{width:20px;height:20px}
+.src .ic{width:16px;height:16px}
+.blk .kb .ic,.blk .kb svg{width:16px;height:16px}
+.bsrc .ic{width:12px;height:12px}
+.flt .ic{width:14px;height:14px}
+.colbtn .ic,.rsb .ic{width:14px;height:14px}
+.qbtn .ic{width:15px;height:15px}
+/* ⚠️⚠️ `.qbtn` 是 30×30 的**圆形图标钮**，本来是给「?」那种单字用的。
+   「搭一条骨架」五个字塞进它，会折成**一竖列**、并从盒子里溢出去压住下面的图例行 ——
+   实测：盒子 28×28，内容 **28×114**，字的墨迹一直画到 y=130，而图例从 y=60 开始。
+   ⚠️ 这种溢出**矩形判据看不见**（`overflow:visible` 不会把父盒子撑大 ⇒「两个 rect 不重叠」照样成立）
+   —— 要么量 `scrollHeight` vs `clientHeight`，要么用 Range 量字的墨迹盒。
+   ⇒ 带文字的钮改成随字宽的药丸。 */
+.qbtn.lbl{width:auto;height:30px;border-radius:999px;padding:0 12px;white-space:nowrap}
+.zoomctl .ic{width:14px;height:14px}
+.shelfpill .ic{width:20px;height:20px}
+.shelf:not(.folded) .shelfpill .ic{width:15px;height:15px}
+.warn .ic,.hsec .ic{width:15px;height:15px}
+.nv.sm .ic{width:14px;height:14px}
+/* 手绘感那层噪声。放在 CSS 上而不是每个 symbol 上 —— 一处改、全站变。
+   ⚠️ 这是**每个图标各跑一次**的滤镜，数量多起来会吃 CPU；真机上如果掉帧，
+      就把它缩到只给 ≥18px 的图标用（.thumb / .fani / .src）。 */
+.ic{filter:url(#rough)}
+/* 选择器里的 Notion 角标 —— 会动到真笔记的那些要一眼看出来 */
+.kpick button{position:relative}
+.nb{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:9px;font-weight:800;
+  width:15px;height:15px;border-radius:4px;background:#111;color:#fff;display:grid;place-items:center;
+  font-family:Georgia,serif}
+.kpick .hd{margin-top:4px}
+.mbox pre{max-height:180px;overflow:auto;background:#f4f5f7;border-radius:9px;padding:9px 11px;
+  font-size:11.5px;white-space:pre-wrap;margin:9px 0 0}
+
+/* ══════════════════════════════════════════════════════════
+   货架：问号、引导指针、缩略图
+   ══════════════════════════════════════════════════════════ */
+.shelfq{width:30px;height:30px;flex:none;border-radius:50%;border:1px solid rgba(255,255,255,.85);
+  background:rgba(255,255,255,.72);color:var(--dim);display:grid;place-items:center;
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  box-shadow:0 6px 18px rgba(20,26,45,.14), inset 0 1px 0 rgba(255,255,255,.9)}
+.shelfq:hover{background:#fff;color:var(--ink)}
+/* ⚠️ 收起时「?」不该露在外面 —— 读者要的是「点击货架之后才看到它」。
+   收起态就是一颗球，别在旁边多挂一个问号（那个问号看着像另一颗按钮）。 */
+.shelf.folded .shelfq{display:none}
+/* ⚠️ 别把容器改成 row —— 面板是往上长的（column-reverse），改成 row 会让
+   面板跑到球的右边去。«?» 和球并排是 `.shelfhead` 里的事，不是容器的事。 */
+.shelfhead{display:flex;align-items:flex-end;gap:7px}
+
+/* 引导指针：每 10 秒跳出来一秒。
+   ⚠️ 用 animation 而不是 transition —— 它要的是"跳出来一下再缩回去"，
+      而 transition 只能表达两个状态之间的过渡，表达不了"停留一秒"。 */
+/* ⚠️⚠️ 两个坑，都是"看不见"而不是"报错"：
+   ① `z-index:73` 比货架那个 74 低 ⇒ 展开的面板正好把它整个盖住。
+      而面板就在那个位置 —— 所以它等于从来没显示过。
+   ② 指针画的是**朝左上**的箭头，而货架在它**右边** ⇒ 指着反方向。
+      `scaleX(-1)` 翻过来，再转 12° 对着右下角的货架。 */
+/* ⚠️ 这个 right 不是随手写的，是有来路的：货架 `right:18px`，收起时宽度 = **球 58px**
+   ⇒ 球的左沿在「距右边 18+58=76px」处；再留 8px 缝隙 ⇒ **right:84px**。
+   以前这里写的是 106px，那是按「球 + 问号」那个旧宽度算的 —— 问号一藏起来（读者要的），
+   货架**窄了 37px**，而它是右对齐的 ⇒ 球整体往右挪，指针立刻离球 30px 指着空地。
+   ⚠️ 以后再动货架宽度（加/减任何东西），这个数要跟着重算 —— 量一次：
+      pill.left - hint.right，目标 8px 左右。 */
+.shelfhint{position:fixed;right:84px;bottom:24px;z-index:78;display:flex;align-items:center;gap:6px;
+  pointer-events:none;opacity:0}
+.shelfhint.on{animation:hintpop 1s ease-in-out}
+.shelfhint .hinticon{width:34px;height:34px;color:#16181d;
+  transform:scaleX(-1) rotate(14deg);
+  filter:drop-shadow(0 3px 7px rgba(0,0,0,.3))}
+.shelfhint span{font-size:11.5px;color:var(--ink);background:rgba(255,255,255,.86);border-radius:999px;
+  padding:3px 10px;border:1px solid rgba(255,255,255,.9);box-shadow:0 4px 14px rgba(0,0,0,.14);white-space:nowrap}
+@keyframes hintpop{
+  0%   {opacity:0;transform:translate(22px,16px) scale(.6)}
+  18%  {opacity:1;transform:translate(0,0) scale(1.06)}
+  32%  {transform:translate(-5px,-4px) scale(1)}
+  48%  {transform:translate(0,0) scale(1.04)}
+  62%  {transform:translate(-5px,-4px) scale(1)}
+  80%  {opacity:1;transform:translate(0,0) scale(1)}
+  100% {opacity:0;transform:translate(10px,10px) scale(.7)}
+}
+@media (prefers-reduced-motion: reduce){ .shelfhint.on{animation:none;opacity:1} }
+
+/* 货架项里的缩略图 */
+.sthumb{width:100%;max-height:88px;object-fit:cover;border-radius:8px;margin-bottom:5px;display:block;
+  border:1px solid rgba(0,0,0,.06)}
+.sitem.file{background:rgba(240,242,246,.95)}
+.sitem .sub{font-size:10.5px;color:var(--dim);margin-top:3px}
+
+/* 有缩略图时，图占满一行（flex-wrap 让它自己换行，不用改结构） */
+.sitem{flex-wrap:wrap}
+
+/* ══════════════════════════════════════════════════════════
+   写回 Notion 的复核台
+   ⚠️ 读者 2026-10-09 定：**每次都要自己勾哪些、才写**。
+      所以这里没有"以后别问"的勾 —— 复核本身就是这个功能的用法，
+      去掉它等于把"我选了才写"变成"它替我选了"。
+   ══════════════════════════════════════════════════════════ */
+.wrlist{max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}
+.wrrow{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border-bottom:1px solid var(--line2)}
+.wrrow:last-child{border-bottom:0}
+.wrrow.off{opacity:.45}
+.wrrow input[type=checkbox]{margin-top:3px;width:15px;height:15px;accent-color:#15171c;flex:none}
+.wrrow .wtxt{flex:1;font-size:12.5px;line-height:1.55;max-height:66px;overflow:hidden}
+.wrrow select{flex:none;width:118px;font-size:12px;padding:4px 6px;border:1px solid var(--line);
+  border-radius:8px;background:#fff}
+.wrrow .wnum{flex:none;width:20px;color:var(--dim);font-size:11px;text-align:right;padding-top:2px}
+.wrrow select.auto{border-color:#c3de3f;background:#f7fbe9}
+
+/* ══════════════════════════════════════════════════════════
+   窄屏（<900px）：两栏收成**抽屉**，主内容占满
+   ══════════════════════════════════════════════════════════
+
+   为什么是**新加一套**，而不是复用 `body.rail-off` / `body.rec-off`：
+     那两套是 `display:none`（栏直接没了），而抽屉要的是**滑进滑出 + 遮罩**。
+     去改它们会连带弄坏 verify-ui 里那几条「两栏收起」的断言。
+
+   断点 900 的依据：`.side` 186 + `.dash` 312 = 498 固定宽，
+   主内容起码要 ~400 ⇒ 498 + 400 ≈ 900。低于它，`.main` 会被挤到 0 宽
+   （实测 390px 时 `.main` = `l:498, w:0`：工作区整个在屏幕外，
+   而 `.modes` 是 `.main` 里的 absolute ⇒ 画到了记录栏上面）。
+
+   ⚠️⚠️ 这一段必须放在文件**最后**：`body.rail-off .side{display:none}` 与
+   `body.narrow .side{display:flex}` **特异型完全相同**，谁赢只看谁在后面。
+   （同特异型看顺序 —— 这条已经栽过六次。）
+   ══════════════════════════════════════════════════════════ */
+.navdrawers{display:none}
+@media (max-width: 899px){
+  body.narrow .side,
+  body.narrow .dash{
+    position:fixed;top:0;bottom:0;left:0;z-index:130;
+    transform:translateX(-100%);
+    transition:transform .22s cubic-bezier(.2,.7,.2,1);
+    box-shadow:0 0 60px rgba(10,14,30,.30);
+  }
+  /* ⚠️ `display` 要重新写一遍：窄屏可能同时还带着 rail-off/rec-off
+     （那是 `display:none`，抽屉就永远滑不出来，而且**不报错**）。 */
+  body.narrow .side{width:min(186px,70vw);display:flex}
+  body.narrow .dash{width:min(312px,86vw);display:flex}
+  /* ⚠️ 一次只开一个：两个都开的话 .dash 正好盖住 .side（都是 left:0） */
+  body.narrow.navopen .side,
+  body.narrow.recopen .dash{transform:none}
+
+  /* 遮罩：默认**完全透明且不接事件**，只有抽屉开着时才亮起来。
+     ⚠️ 默认必须写出来（不是"不写就等于没有"）—— 漏了 opacity:0 的话
+     窄屏一进去整屏就是暗的，而指针事件又是 none，
+     于是「屏幕暗着」和「点不动」会同时出现，看起来像两个毛病。 */
+  body.narrow .drawerscrim{position:fixed;inset:0;z-index:125;background:rgba(14,16,24,.34);
+    opacity:0;pointer-events:none;transition:opacity .22s}
+  body.narrow.navopen .drawerscrim,
+  body.narrow.recopen .drawerscrim{opacity:1;pointer-events:auto}
+
+  /* 打开抽屉的两个把手 —— 只在窄屏出现，钉在左上角 */
+  body.narrow .navdrawers{display:flex;position:fixed;left:10px;top:10px;z-index:100;gap:5px;padding:5px;
+    border-radius:13px;background:rgba(255,255,255,.66);
+    backdrop-filter:blur(22px) saturate(180%);-webkit-backdrop-filter:blur(22px) saturate(180%);
+    border:1px solid rgba(255,255,255,.85);box-shadow:0 10px 28px rgba(0,0,0,.13)}
+  /* 恢复条在窄屏没意义 —— 两栏本来就在抽屉里，不需要"叫回来" */
+  body.narrow .restorebar{display:none}
+
+  /* ⚠️ 主内容全宽之后右上角那三颗模式灯要**缩一号**：
+     原来是 3×56 + 间距 ≈ 180px，在 390px 屏幕上占掉小半屏。
+     它就是现在翻车的东西（`.main` 宽 0 时它画到了记录栏上面）。 */
+  body.narrow .modes{right:10px;top:10px;gap:5px}
+  body.narrow .thumb{width:43px;padding:5px 2px 4px;font-size:9.5px}
+  body.narrow .thumb span{font-size:14px}
+
+  /* 内容区那些按桌面宽度定的留白，窄屏收一收 */
+  body.narrow .kbwrap{padding:60px 14px 24px}
+
+  /* ⚠️ 两个下角各有一颗 58px 的圆钮（左下来源 `.fan`、右下货架 `#shelf`），
+     而 `.vfloat` 的留边是**不对称**的（左 26 / 右 116）—— 那是按桌面算的：
+     桌面正文是 760 居中的，够不到两个角，所以从来没人发现左边不够。
+     窄屏正文只剩 269 宽（26..295），而 `.fan` 占 15..73
+     ⇒ **底部那行提示被来源钮压住左边 47px**（实测，不是看出来的）。
+     左右都按角钮留边：58 + 15 边距 + 一点空隙。 */
+  body.narrow .vfloat{padding:56px 80px 18px 80px}
+  .navdrawers button{width:30px;height:30px;border:0;border-radius:9px;background:none;color:var(--dim);font-size:14px;line-height:1}
+  .navdrawers button:hover{background:rgba(0,0,0,.06);color:var(--ink)}
+  .navdrawers button.on{background:var(--ink);color:#fff}
+}
+
+/* ══════════════════════════════════════════════════════════
+   四角统一（2026-10-09 晚）
+   读者原话：「界面左上角和右上角非常不协调，虽然是两种东西，但是看着很别扭，
+   而且下边还有左下角右下角，这4个角落是否应该给出来的感觉要差不多」
+   ══════════════════════════════════════════════════════════
+
+   动手之前先把四个角**量了一遍**（1440 宽屏，量的是实际 getBoundingClientRect）：
+
+   | 角 | 元素      | 尺寸  | 离边 左/右 | 上/下 | 材质                       |
+   |----|-----------|-------|-----------|-------|----------------------------|
+   | 左上 | `.brand`  | 80×23 | **17**    | 14    | 纯文字，**没有任何容器**   |
+   | 右上 | `.thumb`  | 56×51 | 18        | **15**| 白底 + **深色描边**、无模糊 |
+   | 左下 | `.fanbtn` | 58×58 | **15**    | 15    | 玻璃 blur26                |
+   | 右下 | `.shelfpill`| 58×58| **18**    | **18**| 玻璃 blur26                |
+
+   ⇒ **没有两个是齐的**；上下两对各自也不是一套材质。
+
+   定的规矩（读者自己也说了「虽然是两种东西」—— 所以**不是让它们长一样**）：
+     · 四个角**共用**：离边距离、玻璃配方（底色 / 描边 / 模糊 / 投影）；
+     · **上面一对是「条」**：同高 44、同圆角 14；
+     · **下面一对是「圆钮」**：同直径 58、正圆。
+
+   ⚠️ 这一段必须放在**文件最后**：`.thumb` / `.modes` / `.fan` / `.shelf` 前面都已有同名规则，
+   同特异型时**后面的赢**（这个坑栽过七次）。
+   ⚠️ 改这里时**每条都要把要覆盖的属性写全** —— 没重声明的属性会**原样留着**
+   （`.shelf` 那次就漏出来一块 326×78 的白玻璃浮在右下角）。
+   ══════════════════════════════════════════════════════════ */
+:root{
+  --cn-inset:15px;      /* 四个角离边的距离 —— 全局只有这一个数 */
+  --cn-chip:44px;       /* 上面那一对「条」的高度 */
+  --cn-chip-r:14px;
+  --cn-circle:58px;     /* 下面那一对「圆钮」的直径 */
+  /* 角上共用的一套玻璃。原来下面两颗各自写了一遍，数值还不一样（.90/.72 vs .94/.78）。 */
+  --cn-bg:linear-gradient(150deg,rgba(255,255,255,.92),rgba(244,246,240,.74));
+  --cn-bd:rgba(255,255,255,.88);
+  --cn-blur:blur(26px) saturate(190%);
+  --cn-sh:0 12px 30px rgba(20,26,45,.20), inset 0 1px 0 rgba(255,255,255,.95);
+}
+
+/* ── 左上：品牌 + 收起按钮，做成和右上**同规格**的玻璃条（原来它什么底都没有） ── */
+.side{padding:var(--cn-inset) var(--cn-inset) 78px}
+.shead{height:var(--cn-chip);padding:0 11px;border-radius:var(--cn-chip-r);gap:6px;
+  background:var(--cn-bg);border:1px solid var(--cn-bd);box-shadow:var(--cn-sh);
+  backdrop-filter:var(--cn-blur);-webkit-backdrop-filter:var(--cn-blur)}
+
+/* ── 右上：三颗模式灯，从不透白方块改成同一套玻璃 ── */
+.modes{right:var(--cn-inset);top:var(--cn-inset)}
+.thumb{width:56px;height:var(--cn-chip);border-radius:var(--cn-chip-r);
+  background:var(--cn-bg);border:1px solid var(--cn-bd);box-shadow:var(--cn-sh);
+  backdrop-filter:var(--cn-blur);-webkit-backdrop-filter:var(--cn-blur)}
+/* ⚠️ 原来「选中」只看 `border-color`，那是因为它是**不透明白底**。
+   换成玻璃之后这条还读得出来，但太弱 ⇒ 再压一圈内描边。 */
+.thumb.on{border-color:var(--ink);box-shadow:var(--cn-sh), 0 0 0 1.5px var(--ink)}
+
+/* ── 下面两颗圆钮：同一套玻璃、同一个离边（原来是 15/15 和 18/18） ── */
+.fan{left:var(--cn-inset);bottom:var(--cn-inset);width:var(--cn-circle);height:var(--cn-circle)}
+.fanbtn{width:var(--cn-circle);height:var(--cn-circle);
+  background:var(--cn-bg);border:1px solid var(--cn-bd);box-shadow:var(--cn-sh);
+  backdrop-filter:var(--cn-blur);-webkit-backdrop-filter:var(--cn-blur)}
+.shelf{right:var(--cn-inset);bottom:var(--cn-inset)}
+/* ⚠️ 展开态那条 `.shelf:not(.folded) .shelfpill`（特异型 0,3,0）比这条高，
+   所以展开时仍然是长条 —— 这条只定「收起时那颗圆球」的规格。 */
+.shelfpill{width:var(--cn-circle);height:var(--cn-circle);
+  background:var(--cn-bg);border:1px solid var(--cn-bd);box-shadow:var(--cn-sh);
+  backdrop-filter:var(--cn-blur);-webkit-backdrop-filter:var(--cn-blur)}
+
+/* ── 「叫回来」那条也钉在屏幕左上角，所以它也得齐 ── */
+.restorebar{left:var(--cn-inset);top:var(--cn-inset);background:rgba(255,255,255,.62);
+  border:1px solid var(--cn-bd);box-shadow:var(--cn-sh);
+  backdrop-filter:var(--cn-blur);-webkit-backdrop-filter:var(--cn-blur)}
+
+/* ── 窄屏同一套数：**离边距离不变**，四个角在窄屏也必须齐 ── */
+@media (max-width:899px){
+  body.narrow .modes{right:var(--cn-inset);top:var(--cn-inset)}
+  body.narrow .thumb{height:var(--cn-chip)}
+  body.narrow .navdrawers{left:var(--cn-inset);top:var(--cn-inset);height:var(--cn-chip);align-items:center}
+}
+
+/* ══════════════════════════════════════════════════════════
+   ⚠️ 同一屏里量出来的另一个毛病：**两条中心线**
+   `.vfloat` 的留边原来是不对称的（左 26 / 右 116，右边给货架让位），
+   于是里面那个 `max-width:760` 的居中盒子，中心落在 `.main` 中心**左边 45px**；
+   而光球是按 `.main` 铺满的 ⇒ 两者中心差 45px。
+   实测：光球中心 **970**、输入条中心 **924**。同一屏两个中心，看着就是歪的。
+   ⇒ 左右都按货架那侧留，内容盒回到 `.main` 正中，和光球对齐。
+   （窄屏那条 `body.narrow .vfloat` 本来就是对称的，不用动。）
+   ══════════════════════════════════════════════════════════ */
+.vfloat{padding:60px 116px 18px 116px}
+
+/* ══════════════════════════════════════════════════════════
+   ⚠️⚠️ 改回去 —— 读者 2026-10-09 晚原话：
+     「你网站logo那里不要这么改和难堪，改回去」
+   上一版把 `.shead`（●C4emem + 收起按钮）也套成了和右上**同规格的玻璃条**，
+   他不要。**这个角恢复原样：一行字，没有容器。**
+
+   ⇒ 结果：四个角里**只有左上角是文字**，所以它只能"离边接近"（17 vs 15），
+     不可能相等。**这是读者的决定，不是遗漏** —— 别下次又"顺手统一"回去。
+     （窄屏那个角的抽屉把手 `.navdrawers` **仍然是**玻璃条，那条他没意见。）
+
+   ⚠️ 要覆盖的属性必须**写全**：height / padding / border-radius / gap /
+      底 / 边 / 影 / 模糊，漏一个就会原样留着 ——
+      `.shelf` 那次就是这么漏出来一块 326×78 的白玻璃浮在右下角的。
+   ══════════════════════════════════════════════════════════ */
+.side{padding:14px 9px 78px}
+.shead{display:flex;align-items:center;justify-content:space-between;
+  height:auto;padding:0 8px 12px;border-radius:0;gap:0;
+  background:none;border:0;box-shadow:none;
+  backdrop-filter:none;-webkit-backdrop-filter:none}
+
+/* ══════════════════════════════════════════════════════════
+   侧栏 = 功能注册表的投影（见 src/features.ts 开头）
+   读者要的三件事：**抽屉式分区** / **每个功能带来源图标** / **能删**
+   ══════════════════════════════════════════════════════════ */
+.navscroll{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:2px;padding-bottom:4px}
+/* ⚠️ 「核心」要沉到底 —— 拇指够得到的地方，这是原来就定的（见 features.ts 的 GROUPS） */
+.navsec[data-g="core"]{margin-top:auto}
+.sech{display:flex;align-items:center;gap:6px;width:100%;background:none;border:0;cursor:pointer;
+  padding:7px 9px 3px;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.sech:hover{color:var(--ink)}
+.sech .chev{width:11px;height:11px;flex:none;transition:transform .16s}
+.navsec.closed .chev{transform:rotate(-90deg)}
+.sech span{flex:1;text-align:left}
+.sech .n{font-size:9.5px;opacity:.7}
+.navsec.closed .secb{display:none}
+.secb{display:flex;flex-direction:column;gap:1px}
+
+/* 每一行：图标 + 名字 + **来源小图标** +（装进来的才有）删除 */
+.nv .nvl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nv .srcbadge{flex:none;display:inline-flex;align-items:center;opacity:.62}
+/* ⚠️ 「不依赖来源」的要**压淡**：12 行里 4 行都是它，画得一样重就又回到
+   "所有角标看起来一样"那个毛病了（读者原话：「感觉不太合理」）。 */
+.nv .srcbadge.src-builtin{opacity:.26}
+.nv .srcbadge .ic{width:11px;height:11px}
+.nv.on .srcbadge{opacity:.9}
+.nv .fdel{flex:none;width:16px;height:16px;line-height:15px;text-align:center;border-radius:5px;
+  font-size:12px;color:var(--dim);opacity:0;transition:opacity .12s}
+.nv:hover .fdel{opacity:.75}
+.nv .fdel:hover{background:#fdecec;color:#b3261e;opacity:1}
+
+/* 自我改进那一屏的「建议」行 */
+.crow{display:flex;align-items:center;gap:9px;padding:7px 0;border-top:1px solid var(--line2)}
+.crow:first-of-type{border-top:0}
+.crow .ci{flex:none;color:var(--dim)}
+.crow .k{flex:1;min-width:0}
+
+/* 待办那一屏：有期限的给个柠檬绿角标 —— 一眼看到"什么时候要" */
+.badge.blime{background:var(--lime);color:var(--lime-ink);font-weight:600}
+
+/* ══════════════════════════════════════════════════════════
+   工作区「主动给你留的」—— 时间、状态、处理按钮
+   ══════════════════════════════════════════════════════════ */
+.pcard{transition:opacity .18s, border-color .18s}
+/* ⚠️⚠️ 「处理了」和「略过」**必须长得不一样**。
+   读者 2026-10-10：「这个感觉**处理了和略过没有什么区别**」——
+   根因就在原来那两行：**两个状态共用同一条规则**（一样压暗、一样划掉）。
+   同一个规则画出来的两种状态，用户当然分不出来，而它们的意思完全不同：
+     · 处理了 = 这件事**做完了** → 划掉、标 ✓、给一点柠檬绿（完成是有颜色的）
+     · 略过   = 我**不打算做它** → **不划掉**（它没完成！）、收成一行、灰掉、虚边
+   ⇒ 判据是**两条状态渲染出来真的不同**，见 scripts/verify-panel2.mjs（对着 computed
+      style 比 `opacity` / `border-left-color` / `text-decoration` 三项，不是比 DOM 里有没有类）。 */
+.pcard.done{border-left:3px solid var(--lime);background:color-mix(in srgb, var(--lime) 8%, var(--surface))}
+.pcard.done .prowtop b{text-decoration:line-through;font-weight:400;opacity:.62}
+.pcard.done .badge.bdone{background:var(--lime);color:var(--lime-ink)}
+/* 略过：**收成一行**（细节不占地方），虚线边表示"搁着、没完"。 */
+.pcard.skipped{opacity:.55;border-style:dashed}
+.pcard.skipped .pdet{display:none}
+.pcard.skipped .prowtop b{font-weight:400}
+.pcard.skipped .badge.bskip{background:#e6e8ee;color:#5b6472}
+/* 待处理 / 已处理 / 略过 三段筛 —— 两个状态**分成两张单子**，这是最直接的"不一样" */
+.pfilter{display:flex;gap:6px;margin:0 0 10px}
+.pfilter button{border:1px solid var(--line);background:var(--surface);border-radius:99px;
+  padding:5px 12px;font-size:12.5px;cursor:pointer;color:inherit}
+.pfilter button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.pfilter .n{opacity:.6;margin-left:5px}
+.prowtop{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.prowtop b{flex:1;min-width:60%;font-weight:560;line-height:1.5}
+.pdet{margin-top:6px;line-height:1.6}
+.prowbot{display:flex;align-items:center;gap:8px;margin-top:9px}
+.prowbot .k{flex:1}
+
+/* 「按软件」那一屏：每个软件下面列出它带来的功能 */
+.frow-wrap{margin-top:9px;border-top:1px solid var(--line2)}
+.frow{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12.5px;
+  border-bottom:1px solid var(--line2)}
+.frow:last-child{border-bottom:0}
+.frow b{flex:1;font-weight:520}
+/* ── 功能管理（读者 2026-10-10）───────────────────────────────
+   ⚠️ 「暂时关闭着」和「待安装」这两组**必须一眼看得出不是"在用"** ——
+      它们和上面那组混在一起的话，用户会以为功能没了（而它只是收起来了）。
+      ⇒ 压暗 + 斜体，但**不是 `display:none`**：看得见才敢按"打开"。 */
+.frow .fi{display:inline-flex;width:15px;height:15px;flex:none;opacity:.75}
+.frow .fi .ic{width:15px;height:15px}
+.frow .mhint{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:6px}
+.frow.off{opacity:.62}
+.frow.off b{font-weight:400;font-style:italic}
+/* 主动式那一行右边那个备注框 */
+.prow .pnote{width:190px;flex:none;font-size:12px;padding:6px 8px}
+/* 「点 × 之后」那个二选一：每一档自己带一句"会发生什么" */
+.opt{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:9px}
+.opt b{display:block;margin-bottom:3px}
+.opt .go{margin-top:8px}
+.go.warn{background:#b3261e;color:#fff}
+/* 内置功能那档**没有按钮**，只有说明 —— 要给一条看得见的"为什么" */
+.opt:last-child{border-style:dashed}
+
+/* 「自我改进」里那份**本机软件清单**：点一个选中一个。
+   ⚠️ 选中态必须有**看得见的反馈** —— 点一下没反应的话，用户会以为列表是死的。 */
+.apick{cursor:pointer;border-radius:8px;padding:5px 8px}
+.apick:hover{background:var(--hover,#00000008)}
+.apick.on{background:var(--lime);color:var(--lime-ink)}
+.apick.on .k{color:var(--lime-ink);opacity:.75}
+
+/* 结构流的「运行记录 + 追问」面板。
+   ⚠️ 它是**画布下面的一整条**，不是浮层：跑完一次要能一边看画布一边看结果。 */
+.flowruns{border-radius:12px;margin:0 10px 8px;padding:10px 12px;max-height:42vh;display:flex;flex-direction:column}
+.flowruns .frhead{display:flex;align-items:baseline;gap:10px}
+.flowruns .frhead b{font-weight:600}
+.flowruns .frsp{flex:1}
+.flowruns .frbody{overflow:auto;margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.flowruns .frlog{display:flex;flex-direction:column;gap:2px}
+.flowruns .frlog .st{display:flex;gap:8px;align-items:baseline;font-size:12.5px}
+.flowruns .frlog .st .ok{color:#2f7d32}
+.flowruns .frlog .st .bad{color:#b3261e}
+.flowruns .frlog .st .trig{color:#9aa1ad}
+.flowruns .frout{white-space:pre-wrap;font-size:13px;line-height:1.55;border-left:2px solid var(--lime);padding-left:10px;margin-top:4px}
+.flowruns .frchat{display:flex;flex-direction:column;gap:6px}
+.flowruns .frchat .q{font-weight:560}
+.flowruns .frchat .a{white-space:pre-wrap;font-size:13px;line-height:1.55;opacity:.92}
+
+/* ── 真素材光球（珍珠玻璃 / 岩石）─────────────────────────────
+   ⚠️ 暗舞台以前是**着色器自己画的**；换成真素材之后它没了，得由 CSS 兜底 ——
+   不补这一条，那两个球会浮在页面的浅色底上（素材本来就是深底的）。 */
+/* ⚠️⚠️ 这里必须是**透明**的：`.orbbg` 是 `inset:0` 铺满整屏的，写成不透明色就会
+   把 `.vpane` 上那张**背景图整块盖住** —— 计算样式里 url 明明在、页面却是黑的，
+   看起来像"背景设置没生效"。暗底改由 `.vpane` 自己的三层背景负责（压暗 + 图片 + 渐变）。 */
+.orbbg{background:transparent}
+/* ⭐ 矿物标本（silver / lead / zinc）—— 出自 cominvi.com.mx 的「Minerals we extract」。
+   素材是 720×720 的真视频；`<video id="orbvid">` 仍是**纹理源**（在那里安静地放，
+   变速率也还改它的 `playbackRate`），真正显示出来的是 `#orbkey` 这一块
+   **抠掉了白底**的画布（见 src/ui/vkey.js）。
+
+   ⚠️⚠️ 上一轮我们**故意没抠**，理由是"抠近白底会留一圈白毛"。
+   读者 2026-10-10 明确要求抠掉（「银铅锌要都没有背景抠出来」）——
+   抠出来实测确实比那张白卡干净：**"会留白毛"是阈值问题，不是"抠"本身的问题**
+   （阈值卡在背景 0.00 与标本最亮处 0.19 中间那一段空档里，边缘就没有白圈）。
+   ⇒ 现在**没有白卡、没有圆角、没有底色**，就是一块浮在舞台上的标本。 */
+.orbbg[data-form="silver"] #orbkey,
+.orbbg[data-form="lead"] #orbkey,
+.orbbg[data-form="zinc"] #orbkey{
+  width:min(clamp(230px,46vmin,520px),var(--orbfree,100vmin));
+  height:min(clamp(230px,46vmin,520px),var(--orbfree,100vmin))}
+
+#orbvid{position:absolute;left:50%;top:var(--orbmid,50%);display:none;
+  /* ⚠️ 尺寸：读者 2026-10-10「珍珠玻璃你要改为在宽屏时候更小一些，合适大小，现在太大」。
+     原来是 74vmin —— 1280×860 下算出 636px，几乎顶满一屏，读起来像"一个巨大的气泡"。
+     现在按**可视区短边的一半**算、再封顶 560px：宽屏上不会无限跟着长。 */
+  /* 读者 2026-10-10：「珍珠水晶还是偏大，改小」（原来 clamp(240,50vmin,560) ⇒ 1440×900 下 450px）
+     ⚠️ 读者 2026-10-10 又追了一句「**珍珠还是过大**」⇒ 再降一档到 clamp(150,26vmin,300)。
+        1440×900 下：36vmin=324 → 现在 26vmin=234。判据是**量出来的矩形**，不是"看着差不多"。 */
+  /* ⚠️ 外面再套一层 min(…, var(--orbfree))：记录框被拖到上限时，
+     "上面那块空地"会矮到装不下原来的尺寸 —— 只挪位置是不够的，得跟着缩。
+     （`--orbfree` 由 app.js 的 orbRecenter() 现量现写。） */
+  width:min(clamp(150px,26vmin,300px),var(--orbfree,100vmin));
+  height:min(clamp(150px,26vmin,300px),var(--orbfree,100vmin));
+  object-fit:cover;border-radius:50%;
+  transform:translate(-50%,-50%) scale(var(--orbl,1));
+  transition:transform .12s linear, filter .3s ease}
+/* 抠图层：和 `#orbvid` 同一套定位/尺寸/变换，只是**默认不显示**（只有矿物形态露出来）。
+   ⚠️ `transform` 必须和上面一致 —— 少一句的话，矿物那张会偏离 `--orbmid` 的定心点，
+      而"偏一点"看着像"没对齐"，不像"少了条样式"。 */
+#orbkey{position:absolute;left:50%;top:var(--orbmid,50%);display:none;
+  transform:translate(-50%,-50%) scale(var(--orbl,1));
+  transition:transform .12s linear;
+  /* ⚠️ 抠出来的标本是**没有底**的，直接压在深色舞台上会显得"贴"上去。
+     给它一点投影来交代"浮着"——投影跟着 alpha 走（`drop-shadow` 不是 `box-shadow`）。 */
+  filter:drop-shadow(0 26px 44px rgba(0,0,0,.62))}
+/* ⚠️ **不要**给它加 box-shadow：素材本身自带暗底，再叠一层投影会在圆外
+   圈出一道可见的"光晕边界"—— 那正好把"这是一段方形素材"这件事说出来。 */
+.orbbg.vid #orb{display:none}
+.orbbg.vid #orbvid{display:block}
+/* 「在想」的时候让它自己呼吸一下 —— **只动亮度**，不动形变：
+   形变会把素材画成别的东西，那就不是"一模一样"了。 */
+.orbbg.think #orbvid{animation:orbbreathe 1.8s ease-in-out infinite}
+@keyframes orbbreathe{0%,100%{filter:brightness(1)}50%{filter:brightness(1.14)}}
+/* ⚠️⚠️ 矿物那三个：显示的是**抠图层** `#orbkey`，藏在后面的 `<video>` 只当纹理源。
+   这几条**必须写在 `.orbbg.vid #orbvid{display:block}` 之后** ——
+   两者特异型一样（`.orbbg.vid #orbvid` vs `.orbbg[data-form="silver"] #orbvid`），
+   后写的赢（这个项目栽过七次）。写在前面的话，**白底视频会盖在抠图层上面**，
+   看起来就像"抠图根本没生效"。 */
+.orbbg[data-form="silver"] #orbvid,
+.orbbg[data-form="lead"] #orbvid,
+.orbbg[data-form="zinc"] #orbvid{display:none}
+.orbbg[data-form="silver"] #orbkey,
+.orbbg[data-form="lead"] #orbkey,
+.orbbg[data-form="zinc"] #orbkey{display:block}
+/* ⭐ 标本背后那块**展台光** —— 读者 2026-10-10：「银铅锌**背后有黑色背景，要改美色**」。
+   标本是抠出来的，直接压在暗舞台（`.vpane` 那层是 #15181f→#0c0e13）上，
+   就是"一块黑底上的白石头"。这里补一盏很淡的暖光（美术馆打在展品上的那种），
+   把死黑变成有深浅的暗 —— 只加光，**不遮住背景图**（`::before` 在 `.orbbg` 最底层）。 */
+.orbbg[data-form="silver"]::before,
+.orbbg[data-form="lead"]::before,
+.orbbg[data-form="zinc"]::before{
+  content:'';position:absolute;left:50%;top:var(--orbmid,50%);
+  width:min(clamp(420px,74vmin,880px),var(--orbfree,100vmin));
+  height:min(clamp(420px,74vmin,880px),var(--orbfree,100vmin));
+  transform:translate(-50%,-50%);pointer-events:none;
+  background:
+    radial-gradient(circle at 50% 44%, rgba(255,241,214,.15) 0%,
+      rgba(255,232,190,.055) 40%, rgba(255,226,178,0) 68%),
+    radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 46%, rgba(6,7,10,.30) 100%)}
+/* 降级：WebGL 起不来时（`data-keyfail`）**把原样的视频显示出来** ——
+   白底还在，但标本看得见。⚠️ 降级的路必须自己也在样式表里说清楚，
+   否则"降级"的最后表现是**一片空白**，而那和"坏了"长得一模一样。 */
+.orbbg[data-keyfail="1"][data-form="silver"] #orbvid,
+.orbbg[data-keyfail="1"][data-form="lead"] #orbvid,
+.orbbg[data-keyfail="1"][data-form="zinc"] #orbvid{
+  display:block;width:min(clamp(230px,46vmin,520px),var(--orbfree,100vmin));
+  height:min(clamp(230px,46vmin,520px),var(--orbfree,100vmin));
+  object-fit:contain}
+/* 呼吸**不能直接用上面那个 keyframes** —— 它只写 `filter:brightness()`，
+   会把 `#orbkey` 的 `drop-shadow` 整条盖掉（"在想"的时候标本的投影会突然消失）。 */
+@keyframes orbkeybreathe{
+  0%,100%{filter:drop-shadow(0 26px 44px rgba(0,0,0,.62)) brightness(1)}
+  50%{filter:drop-shadow(0 26px 44px rgba(0,0,0,.62)) brightness(1.14)}}
+.orbbg.think #orbkey{animation:orbkeybreathe 1.8s ease-in-out infinite}
+
+/* ── 侧栏按软件分组（读者 2026-10-10：「按照 zen 那种模式，按照软件来排列」）── */
+.navsec .sech .si{display:inline-flex;width:16px;height:16px;flex:none;opacity:.9}
+.navsec .sech .si .ic{width:16px;height:16px}
+.navsec .sech .chev{opacity:.45;width:11px;height:11px;margin-right:-2px}
+
+/* ── 左下角扇区：功能数角标 + "只带来功能、不是数据来源"的瓦片 ── */
+.fani .fcnt{position:absolute;top:-3px;right:-3px;min-width:15px;height:15px;border-radius:8px;
+  background:var(--lime);color:var(--lime-ink);font-size:9.5px;font-weight:700;line-height:15px;
+  text-align:center;padding:0 3px;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+/* ⚠️ 这种瓦片**不能**看着和真来源一样 —— 点它不会换来源（点了会说清楚）。
+   ⚠️⚠️ 但这条**必须挂在 `.fan.open` 上** —— 和上面 `.fan.open .fani.off` 是同一个道理：
+      裸的 `.fani.nofeed`（特异型 0,2,0）会压过收起态的 `.fani{opacity:0}`（0,1,0）
+      ⇒ **扇区收回了，"主动"那一格还半悬在左下角**（实测 opacity 0.55，其余全 0）。
+      ⚠️ 上面那条注释（`.fani.off` 那次）写的就是这件事，我却在同一个文件里
+        又写了一遍 —— 「同一个错不能犯两次」这句话在样式表里也不成立，
+        **写完带 opacity 的规则要回头看一眼：谁在收起态会赢。**
+      （发现它的是 verify-ui 里那条「收起时瓦片全透明」，它一直红着。） */
+.fan.open .fani.nofeed{opacity:.55}
+
+/* ══ CEVTUO 卡片（主形态）══════════════════════════════════════
+   读者 2026-10-10：「柠檬绿盘不要了改为 cevtuoforecard，这个作为**主选项**，
+   它要有一点**厚度和打光**，像真实的一样」「当说话或者打字的时候可以旋转，但**速度不要太快**」
+
+   ⚠️ 厚度**不是** box-shadow 画出来的（那是一个平面）。这里是把同一个卡面
+   沿 Z 轴叠十几层、每层暗一点点 —— 转起来才看得到一条真实的"卡边"。
+   层数少了会露白，层数多了纯浪费；10 层 · 每层 0.8px ≈ 8px 厚，正好。 */
+/* ⚠️ 透视**是要的**（读者 2026-10-10 改口：「梯形继续保持，但是你要做的更好看更合理一些」）。
+   前一轮我去掉透视做成平行四边形，他要的是**有透视的立体感** —— 那就把它调好，而不是拿掉：
+   · `perspective` 挂在**容器**上、`perspective-origin` 略微偏上（视平线在卡片上三分之一处），
+     这样卡片像**立在桌面上**，而不是浮在屏幕正中被人从中间看。
+   · 数值 1200px：太小（600）会把卡压成一头大一头小的怪样子，太大（3000+）就退回接近正交、
+     厚度又看不出来。1200 是"看得出立体、又不夸张"那一段。
+   · `rotateX(4deg)`：给一点点俯角。给到 10 度以上卡片就会"躺下"，重心散了。 */
+.orbbg{perspective:1200px;perspective-origin:50% 42%}
+/* ⚠️ 卡片/光球定心在**上方那块空地**里，不是整个 pane —— 见 app.js 的 orbRecenter()。
+   `--orbmid` 由 JS 现量出来写进去（默认 50% 是没量到时的兜底）。 */
+.orbcard{position:absolute;left:0;right:0;top:0;height:calc(var(--orbmid,50%) * 2);
+  display:grid;place-items:center}
+/* ⚠️ 厚度走 `--ckz`（**半厚**，px）：大球上 6px、Pet 里 2px。
+   写死 4px 的话，同样的结构搬到 58px 宽的小卡上就是一块砖 ——
+   "厚度"必须相对卡的尺寸，不能是绝对像素。 */
+.ck{position:relative;width:190px;height:296px;transform-style:preserve-3d;--ckz:6px;
+  will-change:transform;transform:rotateX(4deg) rotateY(var(--ry,0deg))}
+.ck i{position:absolute;inset:0;border-radius:13px;background-size:100% 100%;
+  background-repeat:no-repeat;display:block}
+.ck i.ed{background-image:none;background-color:#cfc4a6}
+.ck i.fr{background-image:url(/ui/assets/card.png);transform:translateZ(var(--ckz));
+  /* 卡面自己的收边 + 一点点内高光 ——「质感」主要来自这两笔，不是来自更厚的边 */
+  box-shadow:inset 0 0 0 1px rgba(60,50,30,.18), inset 0 1px 0 rgba(255,255,255,.5)}
+.ck i.bk{background-image:none;background-color:#e9e2ce;transform:translateZ(calc(-1 * var(--ckz))) rotateY(180deg);
+  box-shadow:inset 0 0 0 2px #1b1b1b}
+/* 卡面那层高光：**位置由 JS 按当前角度算**，所以它看起来是"光从左边来"而不是跟着卡转 */
+.ck i.gl{background-image:linear-gradient(100deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.16) 34%,rgba(255,255,255,0) 62%);
+  transform:translateZ(calc(var(--ckz) + .2px));mix-blend-mode:screen;pointer-events:none}
+/* 地面投影：卡片越转越"立起来"，投影就越短越淡 —— 这一条是"像真实的"的一半 */
+/* ⚠️ 地面投影的**宽窄和浓度由 JS 按当前角度写**（`--shw` / `--sho`）——
+   正面时投得宽而淡、侧过来时窄而深，**这一条才是"像立在桌上"**。
+   写死一个尺寸的话，卡转一整圈投影一动不动，眼睛立刻看出是假的。 */
+.ck .sh{position:absolute;left:50%;bottom:-30px;height:24px;width:78%;
+  margin-left:-39%;border-radius:50%;
+  background:radial-gradient(ellipse at center,rgba(0,0,0,var(--sho,.5)),rgba(0,0,0,0) 72%);
+  transform:translateZ(calc(-1 * var(--ckz) - 40px)) scaleX(var(--shw,1))}
+/* ⚠️⚠️ 这个类**不能叫 `card`**（2026-10-10 实测出来的真 bug）：
+   这个文件里第 213 行有一条**通用**的 `.card{background:var(--surface);border:1px solid var(--line);
+   border-radius:12px;padding:14px 16px;margin-bottom:10px}`（知识库那些卡片用的）。
+   同特异型看顺序 ⇒ `.orbbg.card` / `.petbody.card` 会**静默继承**它的底色和**内边距**。
+   症状（读者报的那两条长得像两件事，其实是同一个根因）：
+     · 「**有背景不应该有背景**」—— 白椭圆 = `.card` 的 `background:var(--surface)`
+       配上 `.petbody` 的 `border-radius:50%`；
+     · 「**宽高比改了**」—— `.card` 的 `padding:14px 16px` 把 Pet 的内容盒
+       从 72×112 挤成 40×84（0.48 而不是 0.64），图被压扁。
+   ⇒ 修法是**换一个不可能撞车的类名**，不是加 `!important`、也不是调导入顺序
+     （那两条都会把矛盾藏起来，下一处照样栽 —— 纪律 12）。 */
+.orbbg.ckon #orb,.orbbg.ckon #orbvid,.orbbg.ckon #orbkey{display:none}
+.orbbg.ckon #orbcard{display:grid}
+.ck.breathe{animation:ckbreathe 3.4s ease-in-out infinite}
+@keyframes ckbreathe{0%,100%{translate:0 0}50%{translate:0 -7px}}
+/* ⚠️ 默认藏着、靠 `.orbbg.ckon` 露出来。**不用 `hidden` 属性** —— 那条全局
+   `[hidden]{display:none !important}` 的优先级比这条类选择器高，卡片会永远不出现。 */
+.orbcard{display:none}
+
+/* ══ 窄屏修（读者 2026-10-10 那张 390px 截图）══════════════════
+   ⚠️ 两个都是**量出来**的，不是看着猜的：
+     ① `.vbar` 里的变体下拉在 390 下**超出右边界 57px**（输入框被挤成 28px）——
+        因为 `body.narrow .vfloat` 左右各留了 80px（为躲两个角钮），只剩 230px。
+     ② `.vlog` 空着的时候是一整块 136px 高的空白玻璃卡，看着像"加载失败"。
+   ⚠️ 这两条**必须写在文件最后** —— 同特异型看顺序（同一个项目栽过七次）。 */
+body.narrow .vfloat{padding:52px 12px 78px}
+body.narrow .vbar{flex-wrap:wrap;padding:9px 10px}
+/* 输入框独占一行：这一条同时解决了"下拉被挤出去"和"输入框小得没法用" */
+body.narrow .vtype{flex:1 1 100%;order:3;margin-top:2px}
+body.narrow .vbtn{flex:none;padding:8px 10px}
+body.narrow .vlog{height:auto;max-height:26vh}
+body.narrow .vstate{font-size:11.5px;padding:6px 12px}
+/* 空着的日志框**不占地方** —— 空玻璃卡和"没加载出来"长得一模一样 */
+.vlog:empty{display:none}
+
+/* ══ 全站字体：霞鹜文楷（读者 2026-10-10：「全网站字体改的和你做的 icon 一种风格像手写的」）══
+   ⚠️ 为什么是它：图标是**手绘单线**，配一套印刷体（苹方/思源黑）气质是拧的；
+      楷体天生带笔锋，和手绘描边是一路的。
+   ⚠️ 为什么能只有 1.5MB：原字体 24MB（含 2 万多字），这里**按 GB2312 全字表 + 拉丁 + 标点
+      切了 7386 个字**（日常中文覆盖 99.9%）。切法见 src/ui/assets/README.md，可以重做。
+   ⚠️ 不在那 7386 个字里的（生僻字、emoji）会自动回落到系统字体 —— **不是豆腐块**，
+      但会看出一点混排。真要全量就把 ttf 原件放回来，代价是首屏多 22MB。
+   ⚠️ `font-display:swap`：字体没下完先用系统字体显示，绝不白屏等字体。 */
+@font-face{
+  font-family:'C4 Kai';
+  src:url('/ui/assets/wenkai.woff2') format('woff2');
+  font-weight:400;font-style:normal;font-display:swap;
+}
+body,button,input,select,textarea{font-family:'C4 Kai',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif}
+/* ⚠️ 等宽那几处**必须留着**（代码、token 计数、预格式化文本）——
+   楷体的数字是比例宽，对齐的东西会散架。 */
+pre,code,kbd,samp{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+/* ══ 桌面 CEVTUO Pet ══════════════════════════════════════════
+   ⚠️ 现在它是**应用窗口里的浮层**，不是真的桌面常驻 —— 这点在设置里也照实写，
+      不吹"关掉软件也留着"（那要 Swift 另开一个置顶窗口，见 HANDOFF §6）。 */
+.pet{position:fixed;right:26px;bottom:96px;z-index:140;display:none;
+  width:104px;cursor:grab;touch-action:none;user-select:none}
+.pet.dragging{cursor:grabbing}
+/* 拖东西到它身上（= 进货架）时的"我接着"提示 —— 和货架那颗球同一套观感 */
+.pet.over .petbody{transform:scale(1.12);filter:drop-shadow(0 10px 26px rgba(215,242,74,.7))}
+body.pet-on .pet{display:block}
+/* ⚠️⚠️ `grid-template-*:100%` 这两句**不能省**：
+   不写的话隐式行/列按**内容**撑（Pet 里那张卡的内层 `.ck` 是 190×296），
+   于是 `place-items:center` 根本没有"比它小的格子"可居中 —— 卡片会**整个掉到容器外面去**
+   （实测：petbody 在 y 734..824，而卡片的矩形是 836..927，掉出屏幕一半）。
+   症状是"Pet 里那块卡不见了"，而 DOM、类名、`background-image` **全都正常**。 */
+.petbody{width:104px;height:104px;border-radius:50%;display:grid;place-items:center;
+  grid-template-columns:100%;grid-template-rows:100%;margin:0 auto;
+  filter:drop-shadow(0 10px 22px rgba(0,0,0,.42));transition:transform .18s ease}
+.petbody img,.petbody video{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;background:#131418}
+/* ⭐⭐ 矿物在 Pet 里**完全没有底**（读者 2026-10-10 傍晚第二次说：
+   「银铅锌底黑色**还是没有扣除掉，应该没有背景色才对**」）。
+   ⚠️ 上一版我把死黑换成了暖色圆盘 —— 那是**理解错了**：他要的不是"换个好看的底色"，
+   是**不要底色**。抠出来的标本本来就自带 alpha，垫任何一块颜色都是多余的。 */
+.petbody.mono img{background:none}
+/* 卡片形态在 Pet 里**不裁圆** —— 卡就是个方的，裁成圆的就不像卡了。
+   ⚠️⚠️ 类名 `ptcard` 是**故意绕开 `.card` 的**（撞上通用卡片样式会把图压扁 + 加白底，
+      详见本文件上方 `.orbbg.ckon` 那段长注释和 `verify-pet.mjs`）。
+   ⭐ 读者 2026-10-10：「**卡片有点大，改小一点 pet**」「在 cevtuopet 时候卡片不动要改变，
+      **要旋转**」「卡片的质感不太好，可能太薄了」。
+   ⇒ ① 尺寸 72×112 → **58×90**；
+     ② 不再用一张平铺的 `<img>`，改成**复用大球那套多层卡**（同一个 card.png、同一套层叠厚度），
+        整体 `scale(.305)` 缩下来 —— 另画一张"小卡"的话质感两边就对不上了；
+     ③ **左右各摆 ±26°**慢慢来回（`petckspin`）：这样看得见厚度和卡面的光扫过去，
+        比整圈自转好看（整圈会露出那张空白的背面）。 */
+/* ⚠️⚠️ `filter:none` 也是必须的：祖先上的 `filter` 会**把 3D 压平**
+   （纪律 16 那一族），被压平之后 `back` 那层（DOM 里排在 `fr` 后面）会**盖在卡面上**，
+   于是卡变成一块纯米色方块。投影改由卡片自带的 `.ck .sh` 交代。 */
+.petbody.ptcard{width:58px;height:90px;border-radius:0;background:none;padding:0;border:0;margin:0;filter:none}
+.petbody.ptcard .ck{animation:petckspin 18s ease-in-out infinite}
+@keyframes petckspin{
+  0%,100%{transform:scale(.305) rotateX(4deg) rotateY(-26deg)}
+  50%    {transform:scale(.305) rotateX(4deg) rotateY(26deg)}}
+/* ⚠️ Pet 里那张卡**不要地面投影**（读者 2026-10-10 傍晚：「卡片底部的阴影在 cevtuopet **别加**」）。
+   大球那边那层 `.sh` 是"卡片立在桌上"的一半，而在桌面上那个小家伙本来就没有"桌"可以立。 */
+.petbody.ptcard .ck .sh{display:none}
+.pet:hover .petbody{transform:translateY(-3px)}
+.pet.talking .petbody{animation:petpulse 1.1s ease-in-out infinite}
+@keyframes petpulse{0%,100%{filter:drop-shadow(0 10px 22px rgba(0,0,0,.42))}
+  50%{filter:drop-shadow(0 10px 30px rgba(215,242,74,.75))}}
+/* ── Pet 那一圈：**正在运行的桌面 App**（读者 2026-10-10：「聚集在周围的感觉」）──
+   ⚠️ 按钮**绝对定位 + 坐标由 JS 算**（见 petPaintRing）——
+      写死十几个位置的话，开的 App 一多就会互相叠住。
+   ⚠️ 每颗的入场动画带一个递增的 `animation-delay`，所以它是"从它身上散开"而不是一起蹦出来。 */
+.petring{position:absolute;left:50%;top:50%;width:0;height:0;display:none;pointer-events:none}
+body.petring-on .petring{display:block}
+.petring button{position:absolute;transform:translate(-50%,-50%);width:46px;height:46px;padding:0;
+  border-radius:14px;border:1px solid rgba(255,255,255,.24);background:rgba(20,22,28,.78);
+  -webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);cursor:pointer;
+  display:grid;place-items:center;pointer-events:auto;box-shadow:0 8px 22px rgba(0,0,0,.45);
+  animation:ringin .22s cubic-bezier(.2,.9,.3,1.3) both;transition:box-shadow .12s}
+.petring button:hover{box-shadow:0 10px 26px rgba(215,242,74,.45)}
+@keyframes ringin{from{opacity:0;transform:translate(-50%,-50%) scale(.35)}
+  to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.petring button img{width:34px;height:34px;object-fit:contain;pointer-events:none}
+/* 图标取不到时的兜底：首字母。
+   ⚠️ 读者 2026-10-10 傍晚：「这些快捷字母标记在底下**小一些**提示，不然看不清楚 logo，
+   **也可以不显示（设置里开关）**」⇒ 从"正中一个大字"改成**右下角一个小角标**，
+   它再也盖不住图标；`body.pet-letters-off` 时整个不画。 */
+.petring button .rl{position:absolute;right:1px;bottom:1px;min-width:13px;height:13px;padding:0 3px;
+  display:grid;place-items:center;font-size:9px;font-weight:600;line-height:1;
+  color:#0f1116;background:rgba(215,242,74,.92);border-radius:5px;pointer-events:none}
+body.pet-letters-off .petring button .rl{display:none}
+.petring button i{position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);
+  font-style:normal;font-size:10.5px;color:#e9ecf4;background:rgba(0,0,0,.68);padding:2px 6px;
+  border-radius:7px;white-space:nowrap;opacity:0;transition:opacity .12s;pointer-events:none}
+.petring button:hover i{opacity:1}
+.petring .ringwait{position:absolute;left:0;top:0;transform:translate(-100%,-50%);white-space:nowrap;
+  font-size:12px;color:#e9ecf4;background:rgba(0,0,0,.62);padding:5px 9px;border-radius:9px}
+
+/* 讲话的文字**从头顶冒一个泡泡出来**（读者：「文字用一个泡泡一样出来」） */
+.petbubble{position:absolute;bottom:calc(100% + 6px);right:0;max-width:250px;min-width:64px;
+  padding:9px 12px;border-radius:14px 14px 4px 14px;font-size:13px;line-height:1.5;
+  background:rgba(255,255,255,.94);color:#1b1e28;border:1px solid rgba(0,0,0,.08);
+  box-shadow:0 8px 24px rgba(0,0,0,.22);display:none;white-space:pre-wrap;max-height:190px;overflow:auto}
+.petbubble.on{display:block}
+.pet .petform{position:absolute;left:50%;transform:translateX(-50%);top:-20px;
+  font-size:10px;color:#cfd4e0;background:rgba(0,0,0,.45);padding:2px 7px;border-radius:8px;display:none}
+.pet.showform .petform{display:block}
+/* Pet 那张卡也跟着小一档（原来 84×130）—— 尺寸已经并进上面那条 `.petbody.ptcard`。 */
+
+/* ══ 语音框：高度可拖 + 有上限 ═══════════════════════════════
+   ⚠️ 三条一起才成立：① 高度走变量（拖得动）② 上下都夹住（不会拖出界面）
+   ③ 存起来（下次打开还是这个高度）。少哪条都会变成"看着像坏了"。 */
+.vlog{height:var(--vlogh,136px)}
+.vloggrip{height:9px;cursor:ns-resize;display:flex;align-items:center;justify-content:center;
+  max-width:760px;margin:0 auto;flex:none}
+.vloggrip::after{content:'';width:44px;height:3px;border-radius:2px;background:rgba(255,255,255,.32);
+  transition:background .15s}
+.vloggrip:hover::after,.vloggrip.on::after{background:rgba(255,255,255,.7)}
+/* ⚠️ 窄屏那条 `height:auto;max-height:26vh` 写在文件**更后面**，会盖掉这里的 `height` ——
+   同特异型看顺序（这个项目栽过七次）。所以这儿再显式说一次窄屏用变量。 */
+body.narrow .vlog{height:var(--vlogh,136px);max-height:42vh}
+
+/* ⚠️⚠️ 窄屏下**文字 / 结构流**底下那两条被两个角球压住（读者 2026-10-10：
+   「窄屏幕下这里回遮（文字和结构流）屏幕」）——
+   实测：左下角那颗弧球压在 `.flowbar` 的「运行」上，右下角那颗压在输入框尾巴上。
+   ⚠️ 语音那一屏**早就修过**（`body.narrow .vfloat{padding:52px 12px 78px}`），
+      这两条是漏的 —— 三个模式的底栏是**三份各写各的**，改了要一起改。
+   ⚠️ 让位量 68px 是**量出来的**（两颗球各 58px + 一点余量），别凭感觉写；
+      给的是**内边距**不是外边距：玻璃条本身铺满才好看，被压住的只是里面的东西。 */
+body.narrow .tbar,body.narrow .flowbar{padding-left:68px;padding-right:68px;flex-wrap:wrap}
+
+/* 语音里那个"要不要上网"的行 —— 不再是弹窗 */
+.vlog .askline{margin:6px 0 10px;padding:9px 11px;border-radius:12px;
+  background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.20);white-space:normal}
+.vlog .askline .askacts{display:flex;gap:8px;margin:8px 0 6px}
+.vlog .askline .k{color:rgba(255,255,255,.55);font-size:11.5px}
+.vlog .vlognone{color:rgba(255,255,255,.45);font-size:12.5px;text-align:center;padding-top:14px}
+.vpane:not(.on) .vlog .vlognone{color:var(--dim)}
+/* 货架预览：把那一段**原样摊开**（不截断、保留换行） */
+/* 搜索结果的摘要：长 URL 已经被折掉了，这里只负责让它好读、关键词看得见 */
+.snip{font-size:12.5px;line-height:1.65;word-break:break-word}
+.snip mark{background:color-mix(in srgb, var(--lime) 55%, transparent);color:inherit;border-radius:3px;padding:0 2px}
+/* 搜索命中卡片：**认得出来可以点**（否则"半截的内容"看着就是全部） */
+.hcard{cursor:pointer;transition:border-color .14s}
+.hcard:hover{border-color:color-mix(in srgb, var(--tint) 45%, var(--line))}
+/* 点开之后是**全文**：不截断，自带滚动 */
+.hvbody{white-space:pre-wrap;font-size:13.5px;line-height:1.7;max-height:58vh;overflow:auto;word-break:break-word}
+.spbody{white-space:pre-wrap;font-size:13.5px;line-height:1.6;max-height:56vh;overflow:auto;
+  word-break:break-word}
+.spbody img{max-width:100%;border-radius:9px;margin-bottom:9px;display:block}
+.sitem{cursor:pointer}
+
+/* 右键 Pet 跳过来的那一段：闪一下，让人知道"就是这里" */
+#secpet.flash{animation:secflash 1.2s ease-out}
+@keyframes secflash{0%,100%{background:transparent}
+  15%,55%{background:color-mix(in srgb, var(--lime) 22%, transparent)}}
+
+/* ⚠️⚠️ Pet 拖不动 / "先拖出一张图片才跟上" —— 根因是 **`<img>` 天生可拖**：
+   按住 Pet 时浏览器先起了一个 HTML5 拖拽（拖着那张 card.png 的虚影），
+   我们的 `pointermove` 只是"顺带"跟了一下，所以看起来是"先拽图片、再跟随"。
+   ⇒ 关掉图片/视频自带的拖拽，剩下的才是我们自己的拖动。 */
+.petbody img,.petbody video,.petbody .ck,.petring img{-webkit-user-drag:none;user-drag:none}
+
+/* ── 手机（ADB）：信息 + 相册 ───────────────────────────────── */
+.kv{display:flex;flex-wrap:wrap;gap:10px 26px;font-size:13px}
+.kv>div{display:flex;flex-direction:column;gap:2px}
+.kv .k{font-size:11.5px}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px;margin-top:10px}
+.ptile{position:relative;aspect-ratio:1;border:1px solid var(--line);background:var(--surface);
+  border-radius:11px;cursor:pointer;overflow:hidden;display:grid;place-items:center;
+  grid-auto-rows:auto;align-content:center;gap:4px;padding:6px;color:inherit;font-size:11.5px}
+.ptile:hover{border-color:color-mix(in srgb, var(--tint) 45%, var(--line))}
+.ptile .pnm{word-break:break-all;line-height:1.3;max-height:44px;overflow:hidden}
+.ptile .pk{color:var(--dim);font-size:10.5px}
+.ptile.loading{opacity:.6}
+.ptile.on{padding:0;border-color:var(--lime)}
+.ptile img{width:100%;height:100%;object-fit:cover;display:block}

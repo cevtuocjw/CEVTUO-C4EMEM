@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>C4emem</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/ui/app.css">
+</head><body>
+
+<div class="app" id="app">
+
+  <!-- ── 窄屏的两个抽屉把手（<900px 才出现）────────────────────────
+       桌面宽度下这两栏是并排的，不需要把手；窄屏它们在屏幕外，
+       靠这两颗滑出来。
+       ⚠️ 这里**不能写 `hidden`** —— CSS 里 `[hidden]{display:none !important}`
+       会压过后面的媒体查询，把手在窄屏也永远不出现（而且不报错）。
+       显示与否交给 `.navdrawers{display:none}` + `body.narrow` 那条。
+       ⚠️ 一次只开一个：两个抽屉都是 `left:0`，同时开会互相盖住。 -->
+  <div class="navdrawers" id="navdrawers">
+    <button id="navOpen" title="来源栏"><svg class="ic"><use href="#i-notes"/></svg></button>
+    <button id="recOpen" title="记录栏"><svg class="ic"><use href="#i-topic"/></svg></button>
+  </div>
+  <div class="drawerscrim" id="drawerscrim"></div>
+
+  <!-- ── 1 栏：导航。下半区离手指近 → 核心功能放下面，同步/接入往上放 ── -->
+  <aside class="side" id="side">
+    <div class="shead">
+      <!-- ⭐ 顶上这颗标 = **那张扑克牌**（和 App 图标、网站图标同一个底稿）。
+     ⚠️ 右边那颗 `.dot` **不是装饰**，是"本地服务在不在跑"的指示灯 —— 别把它当成 logo 换掉。 -->
+      <div class="brand"><img class="mark" src="/ui/assets/logo.png" alt=""><b>C4emem</b><span class="dot"></span></div>
+      <button class="colbtn" id="railBtn" title="收起这一栏（全铺内容）">‹</button>
+    </div>
+
+    <!-- 上：这里**只留"不是设置"的那一个** —— 刷新。
+         ⚠️ 读者 2026-10-10：「**所有跟设置相关的全部都放到设置里，包括同步**」。
+            ⇒ 同步、接入都进了设置抽屉（`#gear` 打开的就是它）。
+            刷新留在这儿：它是**操作**（按现在库里的东西重画这一屏），不是设置项。 -->
+    <div class="topzone">
+      <button class="nv sm" id="refreshBtn" title="按现在库里的东西把这一屏重画一遍（不会去外面拉东西）">⟳ 刷新</button>
+      <button class="nv sm" id="gear" title="设置：接入、同步、词表、外观…"><svg class="ic"><use href="#i-plug"/></svg> 设置</button>
+    </div>
+
+    <!-- ⭐ 导航**由功能注册表生成**（src/features.ts）—— 别在这里写死导航项。
+         写死的话"装进来的功能"就没地方去，而那正是这个软件能自我改进的前提。
+         分区（抽屉）+ 每个功能后面的**来源小图标**也在那一份里。见 renderNav()。 -->
+    <div class="navscroll" id="navsections"></div>
+
+    <div class="srcname" id="srclabel">融合 · 全部来源</div>
+  </aside>
+
+  <!-- ── 2 栏：记录 = 工作区看板（这是底层）── -->
+  <section class="dash" id="dash">
+    <div class="dashhead">
+      <b>记录</b>
+      <span class="filters">
+        <button class="flt on" data-k="">全部</button>
+        <button class="flt" data-k="voice"><svg class="ic"><use href="#i-mic"/></svg></button>
+        <button class="flt" data-k="text"><svg class="ic"><use href="#i-keys"/></svg></button>
+        <button class="flt" data-k="flow"><svg class="ic"><use href="#i-flow"/></svg></button>
+        <button class="flt" data-k="recommend"><svg class="ic"><use href="#i-spark"/></svg></button>
+      </span>
+      <button class="colbtn" id="recBtn" title="收起记录栏（全铺内容）">‹</button>
+    </div>
+    <div class="newrow">
+      <button data-new="voice"><svg class="ic"><use href="#i-mic"/></svg> 新语音</button>
+      <button data-new="text"><svg class="ic"><use href="#i-keys"/></svg> 新文字</button>
+      <button data-new="flow"><svg class="ic"><use href="#i-flow"/></svg> 新结构流</button>
+    </div>
+    <!-- ⭐ 记录的**搜索 + 批量删除**（读者 2026-10-10：「记录也应该带搜索和批量删除功能」）。
+         ⚠️ 搜索是**本地筛**（记录已经全在手上，150 条）—— 敲一个字发一次请求没有必要，
+            而且还会让"没筛到"和"请求还在飞"长得一样。 -->
+    <div class="recsearch">
+      <input id="recq" type="search" placeholder="在记录里找…（标题、内容都搜）">
+      <button class="recpick" id="recPick" title="进入多选：勾几条一起删">选择</button>
+    </div>
+    <div class="recbulk" id="recBulk" hidden>
+      <button class="ghost sm" id="recAll">全选</button>
+      <span class="k" id="recSelN">选了 0 条</span>
+      <button class="go sm warn" id="recDel">删除选中的</button>
+      <button class="ghost sm" id="recCancel">取消</button>
+    </div>
+    <div class="loglist" id="loglist"></div>
+    <div class="usagebar" id="usagebar"></div>
+  </section>
+
+  <!-- ── 3 栏：内容 ── -->
+  <main class="main">
+    <!-- 某一栏收起时，内容区左上角留一条玻璃小条把它叫回来。
+         ⚠️ 它是 `.main` 的**子元素**（`position:absolute`），不是 `<body>` 的 fixed 元素 ——
+         挂在 body 上的话，它落在的是「屏幕」左上角，而内容是从「内容区」左上角开始的：
+         只收起来源栏时它就正压着**记录栏的标题**，两个都收起时又压住结构流工具栏
+         （读者截图里「卡片」被压掉一半就是这个）。
+         钉在 `.main` 里，`left:10/top:10` 指的永远是"内容区左上角"，两种情况都只有一个答案。 -->
+    <div class="restorebar" id="restorebar" hidden>
+      <button class="rsb" id="rsRail" title="展开来源栏"><svg class="ic"><use href="#i-notes"/></svg></button>
+      <button class="rsb" id="rsRec" title="展开记录栏"><svg class="ic"><use href="#i-topic"/></svg></button>
+    </div>
+
+    <div class="modes" id="modes">
+      <button class="thumb on" data-m="voice" title="语音（~ 切换）"><span><svg class="ic"><use href="#i-mic"/></svg></span><i>语音</i></button>
+      <button class="thumb" data-m="text" title="文字（~ 切换）"><span><svg class="ic"><use href="#i-keys"/></svg></span><i>文字</i></button>
+      <button class="thumb" data-m="flow" title="结构流（~ 切换）"><span><svg class="ic"><use href="#i-flow"/></svg></span><i>结构流</i></button>
+    </div>
+
+    <!-- 语音：光球铺满，控件是**浮在它上面的玻璃** -->
+    <section class="pane vpane" id="m-voice">
+      <!-- 光球：canvas 是**着色器**那一版（只有「柠檬绿盘」在用），
+           video 是**真素材**那一版（珍珠玻璃 / 岩石）。
+           ⚠️ 两者叠着放，靠 .orbbg.vid 这个类切换 —— 见 app.js 的 setOrbVariant。 -->
+      <div class="orbbg">
+        <!-- 三种形态，同时只露一种（见 app.js 的 setOrbVariant）：
+             · #orbcard  CEVTUO 卡片（**主选项**，有厚度、能转）—— 读者 2026-10-10 定的
+             · #orbvid   真素材视频（珍珠玻璃 / 岩石）
+             · #orb      着色器（只在素材都拿不到时兜底，下拉里已经不放它了） -->
+        <!-- ⚠️ **不要写 `hidden`** —— 全局那条 `[hidden]{display:none !important}` 会压过
+             `.orbbg.card #orbcard{display:grid}`，于是卡片永远不出现（而这个坑记过）。 -->
+        <div class="orbcard" id="orbcard"><div class="ck" id="ck"></div></div>
+        <canvas id="orb"></canvas>
+        <video id="orbvid" muted loop playsinline preload="auto" aria-hidden="true"></video>
+        <!-- ⭐ 矿物标本（银/铅/锌）的**抠图层**：视频照旧在 `#orbvid` 里放（它才是纹理源，
+             变速也是改它的 `playbackRate`），这一块画布只负责把白底抠掉再显示出来。
+             为什么要多一层：本机 ffmpeg 编不出带 alpha 的 webm，而换成动图就拿不到变速
+             —— 详见 src/ui/vkey.js 的注释。 -->
+        <canvas id="orbkey" aria-hidden="true"></canvas>
+      </div>
+      <div class="vfloat">
+        <div class="vstate pill" id="vstate">待机 · 点一下开始说话</div>
+        <!-- ⚠️ 这个把手是**语音框的高度调节**（读者 2026-10-10：
+             「语音转文字了之后和回复的这个框不能无限变大，要变成可以拖拽放大缩小
+              （但是在界面内的感觉）**要有最高值**」）。
+             ⇒ 高度夹在 [96px, 42vh] 之间，存 localStorage；拖出界面是不可能的，因为有上限。 -->
+        <div class="vloggrip" id="vloggrip" title="上下拖，改这个框的高度（有上限）"></div>
+        <!-- ⚠️ 空的时候**放一句占位话**，不能是空的：一是空玻璃卡看着像"加载失败"，
+             二是 `:empty` 那条规则会把整块 `display:none`，于是**把手拖不动任何东西**（实测高 0）。 -->
+        <div class="vlog glass" id="vlog"><div class="k vlognone">还没有对话 · 点下面那颗麦克风开始说</div></div>
+        <div class="vbar glass">
+          <button class="mic" id="mic"><svg class="ic"><use href="#i-mic"/></svg></button>
+          <button class="vbtn" id="muteBtn"><svg class="ic"><use href="#i-speaker"/></svg></button>
+          <div class="vtype"><input id="vinput" type="text" placeholder="也可以直接打字，回车发送…"></div>
+          <select class="vbtn" id="vorb" title="换一个形态"><option value="card">CEVTUO 卡片</option><option value="pearl">珍珠</option><option value="silver">银</option><option value="lead">铅</option><option value="zinc">锌</option></select>
+        </div>
+        <div class="vhint" id="vhint"></div>
+      </div>
+    </section>
+
+    <section class="pane tpane" id="m-text" hidden>
+      <div class="thread" id="thread"></div>
+      <div class="tbar glass"><input id="tinput" type="text" placeholder="问它…（只用你自己笔记的内容回答）"><button class="go" id="tsend">发送</button></div>
+    </section>
+
+    <!-- 知识类视图（推荐/搜索/主题/词条/链接/用量/主动）落在这里，和三个模式共用这一栏 -->
+    <section class="pane" id="m-kb" hidden><div class="kbmount" id="kbmount"></div></section>
+
+    <!-- 结构流：Figma 那种点阵画布，可缩放；三种版式（学 Tuna 的 default / nuggets / 3D）-->
+    <section class="pane fpane lay-default" id="m-flow" hidden>
+      <div class="flowbar">
+        <span class="seg" id="flowstyle">
+          <button data-l="default" class="on" title="卡片 + 连线，竖着走">卡片</button>
+          <button data-l="nuggets" title="Tuna 的 nuggets：小方块阵">Nuggets</button>
+          <button data-l="3d" title="斜面上的立体排布">3D</button>
+        </span>
+        <button class="qbtn lbl" id="flowskel" title="一次摆好四块：事件 → 来源 → 动作 → 去处，并按端口类型连好">搭一条骨架</button>
+        <button class="qbtn lbl" id="flowlib" title="块库：把不用的块收起来，换类型时就不再出现（收起来≠删掉，画布上已有的照跑）">块库</button>
+        <span class="k">点左侧图标选中 · <code>/</code> 换类型 · <code>+</code> 加一块 · <code>Delete</code> 删 · <code>Enter</code> 开跑</span>
+        <button class="qbtn" id="flowHelp" title="结构流怎么用">?</button>
+        <span class="zoomctl glass">
+          <button data-z="out" title="缩小">−</button>
+          <b id="zoomPct">100%</b>
+          <button data-z="in" title="放大">＋</button>
+          <button data-z="fit" title="适应内容">适应</button>
+        </span>
+      </div>
+      <!-- 端口颜色 = 类型。以前只有 hover 才看得到，等于没有（读者：「这些小点什么意义」）。
+           ⚠️ 内容由 JS 从 TYPES 那张**唯一的表**渲染 —— 别在这儿手抄一遍，会漂。 -->
+      <div class="plegend" id="plegend"></div>
+      <div class="flowcanvas" id="flowcanvas">
+        <div class="flowgrid" id="flowgrid"></div>
+          <!-- 线画在这一层：**屏幕坐标**，不跟着 zoom 缩 —— 不然缩放时线会细成一根头发 -->
+          <svg id="wires" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="flowworld" id="flowworld">
+          <div class="flowlist" id="flowlist"></div>
+        </div>
+      </div>
+      <!-- 运行记录 + 追问（读者 2026-10-10：「最好在自己那里有 log 有之后的后续处理和对话」）
+           ⚠️ 它必须**待在结构流自己这一屏里** —— 结果丢进右边记录栏的话，
+              用户要一边看画布一边翻记录，而且那条记录和"这次运行"没有任何绑定的证据。 -->
+      <div class="flowruns glass" id="flowruns" hidden>
+        <div class="frhead">
+          <b>这次跑的</b>
+          <span class="k" id="frwhen"></span>
+          <span class="frsp"></span>
+          <button class="ghost sm" id="frShelf" title="把结果放进右下角货架">放进货架</button>
+          <button class="ghost sm" id="frCopy" title="复制结果全文">复制</button>
+          <button class="ghost sm" id="frHist" title="以前跑过的">历史</button>
+          <button class="ghost sm" id="frClose">收起</button>
+        </div>
+        <div class="frbody">
+          <div class="frlog" id="frlog"></div>
+          <div class="frchat" id="frchat"></div>
+          <div class="row" id="frrow">
+            <input id="frq" placeholder="就着这次的结果接着问…（它只依据这次跑出来的东西回答）">
+            <button class="go" id="frask">问</button>
+          </div>
+        </div>
+      </div>
+      <div class="flowfoot glass">
+        <button class="go" id="flowrun"><svg class="ic"><use href="#i-play"/></svg> 运行</button>
+        <button class="ghost" id="flowclear">清空</button>
+        <button class="ghost" id="flowrunsBtn" title="看这次跑出来的东西、接着追问">记录</button>
+        <span class="k" id="flowout"></span>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ── 来源：左下角一个按钮，点开在 90° 扇区里转着弹出来（融合在最核心那格）── -->
+<div class="fan" id="fan">
+  <div class="fanitems" id="fanitems"></div>
+  <button class="fanbtn" id="fanbtn" aria-expanded="false" title="来源 · 点一下展开">
+    <span class="fanico" id="fangle"><svg class="ic"><use href="#i-summarize"/></svg></span>
+  </button>
+</div>
+
+<!-- ── 全局「c4」：读者 2026-10-10 要的那颗 ——「有一个 c4 以及一个**按钮**，能够打开一个输入框，
+     可以**自我改进也可以搜索**」。⚠️ 它**不是又一个入口**：搜索那条路和搜索页共用同一份实现，
+     改功能那条路和我刚做的「对话改功能」共用同一个接口。这里只是"多开一扇门到同一个房间"。 ── -->
+<button class="c4pill" id="c4pill" title="c4 · 搜索或改功能（⌘K）" aria-label="c4 输入框">
+  <b>c4</b>
+</button>
+<div class="c4modal" id="c4modal" hidden>
+  <div class="c4box" role="dialog" aria-label="c4 输入框">
+    <div class="c4hd"><b>c4</b><span class="k">说一句：想找什么，或者想改哪个功能</span>
+      <button class="c4x" id="c4close" title="关掉（Esc）"><svg class="ic"><use href="#i-close"/></svg></button></div>
+    <input id="c4input" placeholder="比如：玻璃质感 ／ 把推荐关掉 ／ 让主题变成主动式" autocomplete="off">
+    <div id="c4out" class="c4out"></div>
+  </div>
+</div>
+
+<!-- ── 玻璃货架（像 Dropover）：挪到右下角，默认收成一颗药丸，不挡内容 ── -->
+<div class="shelf folded" id="shelf">
+  <div class="shelfhead">
+    <button class="shelfpill" id="shelfToggle" aria-expanded="false" title="货架 · 把任意一段拖进来">
+      <span class="spico"><svg class="ic"><use href="#i-shelf"/></svg></span><b>货架</b><i id="shelfcount">拖动任一段到这儿</i>
+      <span class="shelfbadge" id="shelfbadge" hidden>0</span>
+    </button>
+    <button class="shelfq" id="shelfHelp" title="货架怎么用"><svg class="ic"><use href="#i-help"/></svg></button>
+  </div>
+  <!-- 每 10 秒跳一秒的手绘指针，指给用户看「东西可以拖到这儿」 -->
+  <div class="shelfhint" id="shelfHint" hidden>
+    <span>拖到这儿</span>
+    <svg class="ic hinticon"><use href="#i-cursor"/></svg>
+  </div>
+  <div class="shelfbody" id="shelfbody"></div>
+  <div class="shelffoot" id="shelffoot" hidden>
+    <button class="mini" id="shelfPaste" title="把剪贴板里的一段收进来">＋ 剪贴板</button>
+    <button class="mini" id="shelfSend">送去回答</button>
+    <button class="mini" id="shelfFlow">加进结构流</button>
+    <button class="mini" id="shelfClear">清空</button>
+  </div>
+</div>
+
+<!-- ⭐ 桌面 CEVTUO Pet（读者 2026-10-10）
+     ⚠️ 现在是**应用窗口里的一个浮层**，不是真的桌面常驻 —— 真常驻要 Swift 那边
+        另开一个置顶窗口（见 docs/HANDOFF.md §6）。所以文案说的是"悬浮"，不吹"常驻桌面"。
+     ⚠️ 不用 `hidden` 属性控制显示：全局那条 `[hidden]{display:none !important}` 会压过类规则。 -->
+<div class="pet" id="pet" role="button" tabindex="0"
+     title="点一下做设置里选的那件事 · 右键换形态 · 拖它换位置 · 拖东西到它身上 = 进货架">
+  <div class="petbubble" id="petbubble"></div>
+  <!-- ⭐ 点一下围着它弹出**正在运行的桌面 App**，点一个切过去，再点收回
+       （读者 2026-10-10：「聚集在周围的感觉，选择就可以切换」）。 -->
+  <div class="petring" id="petring"></div>
+  <div class="petbody" id="petbody"></div>
+</div>
+
+<aside class="drawer" id="drawer" hidden>
+  <div class="dhead"><b>设置</b><button class="ghost" id="dclose">关闭</button></div>
+  <div class="dbody" id="dbody"></div>
+</aside>
+
+<!-- 同步：**做了没、做到哪一步、取到几条** 都要看得见。
+     以前点「同步」只发一个 POST，服务端 `spawn(detached)` 起个后台进程就返回，
+     界面上一个字都不说 —— 读者那句「点击接入和同步没有反馈」就是这个。 -->
+<div class="modal" id="syncmodal" hidden>
+  <div class="mbox wide">
+    <div class="mtitle">同步</div>
+    <div class="mbody" id="syncbody"></div>
+    <div class="macts">
+      <button class="go" id="syncAll">全部同步（Notion 四库 + 来源）</button>
+      <button class="ghost" id="syncClose">关掉</button>
+    </div>
+  </div>
+</div>
+
+<!-- 笔记里没有（或只有弱相关）时问一句：要不要上网找 -->
+<!-- ⭐ 货架里那一段到底是什么（读者 2026-10-10：「货架内的东西**点击要能预览**看具体内容是什么」）
+     ⚠️ 货架上只显示一行截断的文本，长的东西根本看不出是什么 —— 预览是把它摊开。 -->
+<!-- ⭐ 搜索命中：点开看**全文**（读者：「点击也能全览那里的内容才行」） -->
+<div class="modal" id="hitview" hidden>
+  <div class="mbox wide">
+    <div class="mtitle" id="hvTitle">这一段</div>
+    <div class="mbody">
+      <div class="hvbody" id="hvBody"></div>
+      <div class="k" id="hvMeta" style="margin-top:8px"></div>
+    </div>
+    <div class="macts">
+      <button class="go" id="hvUse">拿去用</button>
+      <button class="ghost" id="hvShelf">放进货架</button>
+      <button class="ghost" id="hvCopy">复制</button>
+      <button class="ghost" id="hvOpen" hidden>打开</button>
+      <button class="ghost" id="hvClose">关掉</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="shelfprev" hidden>
+  <div class="mbox">
+    <div class="mtitle" id="spTitle">这一段</div>
+    <div class="mbody"><div id="spBody" class="spbody"></div></div>
+    <div class="macts">
+      <button class="go" id="spUse">拿去用</button>
+      <button class="ghost" id="spCopy">复制</button>
+      <button class="ghost" id="spClose">关掉</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="askmodal" hidden>
+  <div class="mbox">
+    <div class="mtitle" id="mtitle">你的笔记里没有</div>
+    <div class="mbody" id="mbody"></div>
+    <div class="macts">
+      <button class="go" id="mWeb"><svg class="ic"><use href="#i-globe"/></svg> 上网找</button>
+      <button class="ghost" id="mNo">算了</button>
+    </div>
+    <label class="mchk k"><input type="checkbox" id="mAuto"> 以后别问了，笔记里没有就直接上网</label>
+  </div>
+</div>
+
+<!-- 结构流怎么用（用户要的那个"提示按钮"） -->
+<div class="modal" id="flowhelp" hidden>
+  <div class="mbox wide">
+    <div class="mtitle">结构流 = 一句话，只是每个成分你都能挑</div>
+    <div class="mbody">
+      <div class="hsec"><h4>先回答最容易卡住的那个问题：顺序有要求吗？</h4>
+        <p><b>没有。</b>块摆在哪、是第几个，都不影响它怎么跑 —— 决定关系的是<b>连的那条线</b>和
+           <b>两端端口的类型</b>，不是位置。一个块可以什么都不连，也可以接好几条线。</p>
+        <p>但有一条<b>推荐的骨架</b>，照着搭最省事：<b>事件 → 来源 → 动作 → 去处</b>。</p>
+        <table>
+          <tr><td><b>事件</b>→</td><td>什么时候做（手动 / 到点了 / 切到某应用）</td></tr>
+          <tr><td><b>来源</b>→</td><td>拿什么做（我的笔记 / 网页 / 剪贴板 / 邮件）</td></tr>
+          <tr><td><b>动作</b>→</td><td>做什么（问 AI / 总结 / 翻译 / 归类）</td></tr>
+          <tr><td><b>去处</b></td><td>结果去哪（写回 Notion / 放货架 / 存文件 / 念出来）</td></tr>
+        </table>
+        <p class="k">两头能省：没有事件 = 你手动点「运行」；没有去处 = 只出结果不落地。
+           中间那两块（来源、动作）才是这句话的主干。</p>
+      </div>
+      <div class="hsec"><h4>端口颜色是什么意思</h4>
+        <p>块两侧那些小圆点<b>不是装饰，颜色就是类型</b> —— 绿的是「笔记」、蓝的是「文本」、
+           紫的是「事件」…… 画布上方那排图例就是它。</p>
+        <p><b>只有同一种类型才连得上。</b>从「我的笔记」拉线到「问 AI」合法（前者吐笔记，后者收笔记）；
+           拉到「翻译」不合法（它只收文本）。拖线时能接的会亮、不能接的会暗，规则不用背。</p>
+      </div>
+      <div class="hsec"><h4>主谓宾</h4>
+        <table>
+          <tr><td><b>主语 · 来源</b></td><td>我的笔记 · 上网找 · 剪贴板 · 企业微信邮件 · Figma · 读文件</td></tr>
+          <tr><td><b>谓语 · 动作</b></td><td>问 AI · 总结 · 查词翻译 · 归类 · 抽要点 · 判断</td></tr>
+          <tr><td><b>宾语 · 去处</b></td><td>写回 Notion · 放货架 · 存文件 · 弹通知 · 打开 · 念出来 · 发手机</td></tr>
+          <tr><td><b>事件</b></td><td>手动 · 到点了 · 切到某应用 · 复制了新东西 · 手机来通知</td></tr>
+        </table>
+        <div class="hint">事件<b>点火</b>，它不在句子里 —— 但只有它能决定这句话什么时候被说出来。</div>
+      </div>
+      <div class="hsec"><h4>线为什么有意义</h4>
+        <p>因为<b>每个接口有类型</b>。把线从「我的笔记」拉到「问 AI」是合法的：前者吐<b>笔记</b>，后者收<b>笔记</b>。拉到「翻译」就不合法 —— 它只收<b>文本</b>。</p>
+        <p>如果每个口什么都收，线就只是装饰：画得好看，什么也保证不了。<b>所以限制只加在类型上，不加在内容上</b> —— 每块里爱写什么写什么。</p>
+        <p>拖线的时候，<b>能接的会亮、不能接的会暗</b>，规则不用背。</p>
+      </div>
+      <div class="hsec"><h4>三种线</h4>
+        <table>
+          <tr><td><b>数据流（实线）</b></td><td>把 A 的输出当 B 的输入 —— 最常用，直接拖</td></tr>
+          <tr><td><b>顺序（虚线）</b></td><td><code>Shift</code> + 拖。A 跑完再跑 B，<b>不传数据</b>，只表示先后</td></tr>
+          <tr><td><b>条件（点线）</b></td><td><code>Alt</code> + 拖。A 的判断为真，才跑 B</td></tr>
+        </table>
+      </div>
+      <div class="hsec"><h4>不拖也能全做完</h4>
+        <table>
+          <tr><td><code>⇧</code> + 方向键</td><td>朝那个方向新建一块并连上 —— 这就是「分叉」</td></tr>
+          <tr><td><code>⌥</code> + 方向键</td><td>只连一条顺序线到最近那块，不新建</td></tr>
+          <tr><td><code>Tab</code> / <code>⇧Tab</code></td><td>在块之间移动</td></tr>
+          <tr><td><code>Enter</code> / <code>/</code> / <code>Delete</code></td><td>编辑 / 换类型 / 删掉</td></tr>
+          <tr><td><code>⌘</code> + <code>Enter</code></td><td>跑</td></tr>
+        </table>
+      </div>
+      <div class="hsec warn"><h4><svg class="ic"><use href="#i-warn"/></svg>只有「宾语」那一步会动到外面</h4>
+        <p>写回 Notion、发通知、打开东西、存文件 —— 这些<b>真的会改变外面的世界</b>。这类块标着「会动到外面」。</p>
+        <p>写回 Notion 我<b>没</b>让结构流直接写：它走「推荐」页勾选那条路。不可撤销的写操作，不该由一个流程图顺手做掉。</p>
+      </div>
+    </div>
+    <div class="macts"><button class="go" id="helpClose">知道了</button></div>
+  </div>
+</div>
+
+<!-- 动到外面之前先问一句（结构流跑到「写回 Notion」时用） -->
+<div class="modal" id="confirmmodal" hidden>
+  <div class="mbox">
+    <div class="mtitle" id="cfTitle">确认</div>
+    <div class="mbody" id="cfBody"></div>
+    <div class="macts">
+      <button class="go" id="cfOk">确认</button>
+      <button class="ghost" id="cfNo">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 货架怎么用 -->
+<div class="modal" id="shelfhelp" hidden>
+  <div class="mbox">
+    <div class="mtitle">货架 = 你先把它放在这儿，待会儿再用</div>
+    <div class="mbody">
+      <div class="hsec"><h4>能往上放的，比你以为的多</h4>
+        <table>
+          <tr><td><b>拖</b></td><td>记录里的任一条 · 对话里你发的或它答的 · <b>语音那一屏的每一句</b> · 多选几段一起拖</td></tr>
+          <tr><td><b>选中再拖</b></td><td><b>在哪儿都行</b> —— 选中一段文字直接拖过来，不用先复制（画布上的块、知识库的卡片都算）</td></tr>
+          <tr><td><b>复制</b></td><td>在外面按 <code>⌘C</code>，回这儿按 <code>⌘V</code>（焦点别在输入框里）；或者点货架上那颗「<b>＋ 剪贴板</b>」</td></tr>
+          <tr><td><b>选中 + 点货架</b></td><td><b>万能的一条</b>：选中任何一段文字，然后点一下货架 —— 不看它是什么元素、在哪个页面</td></tr>
+          <tr><td><b>图片 / 文件</b></td><td>从访达或网页直接拖进来，或者复制图片后粘贴 —— 图上会带缩略图</td></tr>
+          <tr><td><b>网页链接</b></td><td>拖一个链接进来，记的是地址和标题</td></tr>
+        </table>
+      </div>
+      <div class="hsec"><h4>放进去之后</h4>
+        <table>
+          <tr><td><b>送去回答</b></td><td>把架子上的东西一起丢给 AI，让它拿这些当材料答</td></tr>
+          <tr><td><b>加进结构流</b></td><td>变成结构流里的块，接着往下接动作</td></tr>
+          <tr><td><b>再拖出去</b></td><td>架子上的每一项自己也能拖走</td></tr>
+        </table>
+      </div>
+      <div class="hsec"><h4>为什么要有这个东西</h4>
+        <p>因为你收集东西的时候还不知道要拿它干什么。先丢进来，等想法成形了再决定 ——
+           中间不用去开一个新的笔记、也不用把这段话先粘到别处。</p>
+      </div>
+      <div class="hsec warn"><h4>它只在本机</h4>
+        <p>货架存在浏览器本地（<code>localStorage</code>），不上传、不同步。清掉浏览器数据它就没了。</p>
+      </div>
+    </div>
+    <div class="macts"><button class="go" id="shelfhelpClose">知道了</button></div>
+  </div>
+</div>
+
+<!-- 写回 Notion 的复核台：**每次都要自己勾、自己选页面**，没有"以后别问" -->
+<div class="modal" id="writemodal" hidden>
+  <div class="mbox wide">
+    <div class="mtitle" id="wrTitle">写回 Notion</div>
+    <div class="mbody">
+      <div class="k" style="margin-bottom:9px" id="wrHint"></div>
+      <div class="wrlist" id="wrList"></div>
+    </div>
+    <div class="macts">
+      <button class="ghost" id="wrAll">全选</button>
+      <button class="ghost" id="wrNone">全不选</button>
+      <span style="flex:1"></span>
+      <button class="go" id="wrWrite">写入</button>
+      <button class="ghost" id="wrCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/ui/app.js"></script>
+</body></html>

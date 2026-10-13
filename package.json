@@ -1,0 +1,21 @@
+{
+  "name": "c4emem",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "description": "Cevtuo C4emem — 本地优先的个人知识库语音助手。核心服务先行（P0：知识核心）。",
+  "bin": {
+    "c4emem": "./src/cli.ts"
+  },
+  "scripts": {
+    "c4emem": "bun run src/cli.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.0",
+    "imapflow": "^2.3.0",
+    "mailparser": "^3.9.37"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

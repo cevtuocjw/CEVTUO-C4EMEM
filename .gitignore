@@ -1,0 +1,20 @@
+node_modules/
+.env
+c4emem.config.json
+*.db
+*.db-wal
+*.db-shm
+.cache/
+dist/
+.DS_Store
+
+# ── 构建产物 / 日志（2026-10-13 首次 git init 时补的）──────────────
+# ⚠️ `app/C4emem.app` 是**构建产物**（82M，里面还带着一份 src/ui 的快照），
+#    它由 `bash app/build.sh` 生成 —— 进仓库只会让每次提交都拖一个 82M 的二进制，
+#    而且**那份快照会和真源码悄悄分叉**（改了 src/ui 忘了重新打包，包里就是旧的）。
+out/
+app/C4emem.app/
+app/.build.swift
+pet-bridge.log
+__pycache__/
+*.pyc

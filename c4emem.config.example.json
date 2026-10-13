@@ -1,0 +1,80 @@
+{
+  "$comment": [
+    "C4emem 配置。复制成 c4emem.config.json 再改。",
+    "⚠️ 这里永远不出现密钥 —— 密钥只写在 .env 里，这里只写『去哪个环境变量拿』。",
+    "这就是『不写死』的落实：换模型、换供应商、换知识源，都只改这个文件。"
+  ],
+
+  "dataDir": "~/.c4emem",
+
+  "notion": {
+    "version": "2022-06-28",
+    "apiKeyEnv": "NOTION_TOKEN",
+    "spaces": [
+      { "key": "techai", "label": "TECH-AI", "pageId": "fc17863a1b8543c6ad0288dc80e3bb22" },
+      { "key": "techlearn", "label": "tech-learn", "pageId": "045f87789ebd4741a0059c898a9089d4" },
+      { "key": "shopping", "label": "Shopping", "pageId": "3dff24c4e01f496d86b5a7fb5b3b133b" },
+      { "key": "learn", "label": "Learn", "pageId": "d6d5f4924b904e8c94ff4ab1a27c1af3" }
+    ],
+    "skipTitles": "",
+    "$skipTitlesNote": "留空 = 全部收录。填正则（如 '^\\s*(before|旧|old)\\b'）可跳过某些子树。⚠️ 跳过是整棵子树：实测 Learn 页那个 `before` toggle 占全部 7297 块里的 6861 块（94%）—— 对个人知识库，归档恰恰是「时间机器」最需要的，所以默认不跳。",
+    "maxDepth": 12
+  },
+
+  "embedding": {
+    "provider": "openai-compatible",
+    "$providerOptions": ["openai-compatible", "local"],
+    "baseUrl": "http://127.0.0.1:11434/v1",
+    "$baseUrlNote": "本机 ollama。它有 OpenAI 兼容端点，所以不需要单独的适配器。外部分只用 https://api.siliconflow.cn/v1 之类。",
+    "model": "qwen3-embedding:0.6b",
+    "dims": 1024,
+    "batchSize": 16,
+    "apiKeyEnv": "",
+    "$apiKeyEnvNote": "留空 = 不发 Authorization 头（本地端点不需要）。外部端点必须填。",
+    "$alternatives": {
+      "local": "provider=local 走 transformers.js（Xenova/bge-small-zh-v1.5，95MB，不需要 ollama，余量最差 0.115）",
+      "ollama": "qwen3-embedding:0.6b = 639MB，余量最差 0.162；bge-m3 更好但 1.2GB"
+    },
+    "hfEndpoint": "https://hf-mirror.com",
+    "$hfEndpointNote": "只在使用 provider=local 时有用。huggingface.co 国内打不通，走镜像；⚠️ transformers.js 不认 HF_ENDPOINT 环境变量，只能从它自己的 env.remoteHost 改。",
+    "queryPrefix": "为这个句子生成表示以用于检索相关文章：",
+    "$queryPrefixNote": "只对 provider=local 的 bge 系列有效"
+  },
+
+  "llm": {
+    "provider": "openai-compatible",
+    "$providerOptions": ["openai-compatible", "none"],
+    "baseUrl": "https://api.deepseek.com/v1",
+    "model": "deepseek-chat",
+    "apiKeyEnv": "C4EMEM_LLM_API_KEY",
+    "maxTokens": 1200,
+    "temperature": 0.2
+  },
+
+  "rerank": {
+    "provider": "none",
+    "$providerOptions": ["none", "api"],
+    "$note": [
+      "重排：把融合后的前 topN 条送给一个 cross-encoder 打分再排序。",
+      "⚠️ 它只对**候选**重排 —— 正确答案如果没进 candidates，reranker 救不了。",
+      "   实测：答案在全库排第 66 名，candidates=40 时够不着；提到 200 才进得来。",
+      "⚠️ ollama 不做 cross-encoder，所以本地这条路只保留 none（RRF 顺序）。",
+      "   要质量就接 API —— 重排本来就属于「最终分析」那一层。"
+    ],
+    "baseUrl": "https://api.siliconflow.cn/v1",
+    "model": "BAAI/bge-reranker-v2-m3",
+    "apiKeyEnv": "C4EMEM_RERANK_API_KEY",
+    "topN": 40
+  },
+
+  "retrieval": {
+    "topK": 8,
+    "candidates": 200,
+    "$candidatesNote": "每条腿先各取多少个进 RRF 融合池。⚠️ 实测 40 太小：正确答案常常落在第 50~70 名（小模型在主题密集的语料上区分度平），而 reranker 只对**候选**重排，进不了候选就救不回来。200 在 1602 块规模下几乎不花时间。",
+    "rrfK": 60,
+    "chunkChars": 420,
+    "overlapChars": 80,
+    "minScore": 0.4,
+    "$minScoreNote": "余弦下限；低于它的向量命中丢掉，不进 prompt。实测「Crapette 是什么」8 条材料里只有 1 条有用，其余是噪声 —— 而 ask 按 token 计费。关键词命中没有余弦，不参与过滤。"
+  }
+}

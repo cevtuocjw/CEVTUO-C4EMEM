@@ -1,0 +1,42 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>C4emem 光球</title>
+<style>
+body{margin:0;background:#eef0f3;font:14px/1.6 -apple-system,"PingFang SC",sans-serif;color:#22252b}
+.stage{position:relative;width:100vw;height:100vh;overflow:hidden}
+canvas{width:100%;height:100%;display:block}
+.ui{position:fixed;left:24px;bottom:24px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+  background:rgba(255,255,255,.72);backdrop-filter:blur(14px);border:1px solid rgba(0,0,0,.06);
+  border-radius:14px;padding:10px 12px}
+button{font:inherit;border:1px solid rgba(0,0,0,.12);background:#fff;border-radius:9px;padding:7px 13px;cursor:pointer}
+button.on{background:#1c1f26;color:#fff;border-color:#1c1f26}
+input[type=range]{width:150px}
+.tag{position:fixed;left:28px;top:24px;font-size:12.5px;color:#5b6270;letter-spacing:.4px}
+</style></head><body>
+<div class="stage"><canvas id="c"></canvas></div>
+<div class="tag">C4emem 语音光球 · WebGL 光线步进</div>
+<div class="ui">
+  <button data-v="pearl" class="on">珍珠玻璃</button>
+  <button data-v="stone">岩石</button>
+  <button data-v="lime">柠檬绿盘</button>
+  <span style="width:10px"></span>
+  <button data-s="idle" class="on">待机</button>
+  <button data-s="listening">聆听</button>
+  <button data-s="thinking">思考</button>
+  <span style="width:6px"></span>
+  <label style="font-size:12.5px;color:#5b6270">音量</label>
+  <input id="lv" type="range" min="0" max="100" value="0">
+</div>
+<script type="module">
+import { createOrb } from './orb.js';
+const orb = createOrb(document.getElementById('c'), { variant: 'pearl' });
+document.querySelectorAll('button').forEach(b=>{
+  b.onclick = () => {
+    if (b.dataset.v) { orb.setVariant(b.dataset.v);
+      document.querySelectorAll('button[data-v]').forEach(x=>x.classList.remove('on')); b.classList.add('on'); }
+    if (b.dataset.s) { orb.setState(b.dataset.s);
+      document.querySelectorAll('button[data-s]').forEach(x=>x.classList.remove('on')); b.classList.add('on'); }
+  };
+});
+document.getElementById('lv').oninput = e => orb.setLevel(e.target.value/100);
+window.__orb = orb;
+window.__ok = true;
+</script></body></html>

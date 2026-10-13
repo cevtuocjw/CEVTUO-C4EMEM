@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CEVTUO Pet</title>
+<!-- ⚠️ 这一页是给 **桌面那个独立小窗口** 用的（Swift 侧的置顶透明窗），
+     不是给主界面用的。所以：
+       · 底**必须透明**（`html,body{background:transparent}` + Swift 那边
+         `isOpaque=false` / `backgroundColor=.clear` / WKWebView `drawsBackground=false` ——
+         三处少一处就是一块白板 / 黑板盖在桌面上）；
+       · 只引 `app.css`（`.pet` / `.petbody` 那些样式全在里面，另一份会漂移）；
+       · 没有侧栏、没有记录栏，只有这一个家伙。 -->
+<link rel="stylesheet" href="/ui/app.css">
+<style>
+  /* 透明窗：三处一起才对（见上面那段注释） */
+  html,body{background:transparent !important;overflow:hidden;margin:0;height:100%}
+  /* 小程序窗里它就是页面的全部，不需要"贴右下角"那套定位 */
+  .pet{right:26px;bottom:96px}
+  /* 窗口小的时候，那一圈会被裁掉 —— 由 pet.js 通知 Swift 把窗**放大**再展开，
+     所以这里不加 `overflow:hidden`（加了那一圈就永远出不来） */
+  body{overflow:visible !important}
+
+  /* ══ 轮盘（Launchy 那个模型）══════════════════════════════════
+     ⚠️ 这些规则**刻意不放进 app.css**：`app.css` 里的 `.petring` 是**主界面窗口里**
+        那个浮层版 Pet 用的（两处的宿主不同、窗口大小也不同）。
+        混在一份里的话，改这边会把那边一起改坏，而那边没有回归套件盯着。
+     几何（角度/半径）全在 pet.js 里算 —— CSS 只负责"长什么样"。 */
+  .pw{position:absolute;left:50%;top:50%;width:0;height:0;display:none;z-index:2}
+  body.pw-on .pw{display:block}
+  .pwwheel{position:absolute;left:0;top:0;width:0;height:0}
+  .pwsvg{position:absolute;left:0;top:0;transform:translate(-50%,-50%);overflow:visible;pointer-events:none}
+  /* ⚠️ 扇区现在**看不见**（读者要"不要扇形的底"），但它**仍然是命中区** ——
+     指针落在哪个扇区的角度带里就选哪个 App（这就是"两个图标中间不会闪"的原因）。
+     ⚠️ 所以 `fill` 不能写 `none`（那会连命中区一起没掉），要写一个**肉眼看不见但不为 0** 的 alpha。 */
+  .pwsg{fill:rgba(255,255,255,.004);stroke:none;
+    pointer-events:auto;cursor:pointer;transition:fill .12s ease}
+  /* 悬停时只留**很淡**的一层柠檬绿——够看出"现在指着的是哪一格"，又不是一大块扇形底 */
+  .pwsg.on{fill:rgba(215,242,74,.10)}
+  /* ⭐ 一颗一颗的玻璃小方块（"回归我们这种"）。它才是**视觉**；
+     扇区只管**命中**。（上一版把视觉和命中都压在扇形上，所以撤掉扇形就没东西可看了。） */
+  /* ⚠️⚠️ 内边距 **4**（2026-10-12 从 12 收下来）。方块宽 = 图标 + 4。
+     ── 为什么 12 是错的：这些方块**是轴对齐的**（没有跟着弧转），
+        所以"不重叠"的判据**不是** `弦长 ≥ 方块宽`，而是**投影**：
+        `弦长 × max(|cos θ|, |sin θ|) ≥ 方块宽`（θ = 相邻两格中点的角度）。
+        实测那一刻（`scripts/verify-petwheel.mjs` 的几何契约）：
+        m 档中圈 r=84、Δa=28.8° ⇒ 弦长 41.8，而最"斜"的那一对在 219.6°，
+        `max(|cos|,|sin|)=0.771` ⇒ 只允许 41.8×0.771 ≈ **32.2** 的方块。
+        12 的边距给出 38 ⇒ **真的叠了 11.1×6.0 px**（截图里 H 和 A 两个角压在一起）。
+        4 的边距给出 30 ✓，s 档 26 ✓，l 档 34（上限 36.8）✓ —— 三档都有 2~3px 余量。
+     ⚠️ 别再把它调回去：半径没动、**只是方块变小了**，所以看起来只会"更靠近"
+        （读者 2026-10-11：「太分散了，要更靠近一些」），不会有别的变化。 */
+  .pwic{position:absolute;left:0;top:0;width:calc(var(--pwic,28px) + 4px);height:calc(var(--pwic,28px) + 4px);
+    display:grid;place-items:center;pointer-events:auto;cursor:pointer;
+    border-radius:9px;border:1px solid rgba(255,255,255,.20);background:rgba(20,22,28,.80);
+    -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    box-shadow:0 8px 20px rgba(0,0,0,.45);
+    transition:transform .12s cubic-bezier(.2,.9,.3,1.2),border-color .12s,background .12s}
+  .pwic img{width:var(--pwic,28px);height:var(--pwic,28px);object-fit:contain;pointer-events:none}
+  /* ⚠️ 这里**原来写着 `transform:scale(1.12)`，它从来没生效过**：`.pwic` 有行内
+     `transform:translate(…) translate(-50%,-50%)`，行内**永远赢**类里的那条。
+     两件事：① 那句是**意图**不是事实（改样式的人会以为选中会变大）；
+     ② 就算让它生效也是错的 —— 放大 12% 会把方块从 30 顶到 33.6，越过上面算出来的
+     32.2 上限 ⇒ **选中的那一格会和邻居压在一起**（正好是最该看清楚的时候）。
+     ⇒ 反馈改由**图标自己**放大（图片不改变 `.pwic` 的矩形，几何契约不受影响），
+       方块本体的发光仍然走 box-shadow。 */
+  .pwic.on{border-color:rgba(215,242,74,.85);background:rgba(32,36,26,.88);
+    box-shadow:0 10px 26px rgba(215,242,74,.35)}
+  .pwic.on img{transform:scale(1.08)}
+  /* 没有图标文件的 App（图标只活在 Assets.car 里，`sips` 取不到）——
+     退成一个**首字母**。⚠️ 不能什么都不画：那一格空着看起来像"这个软件没装上"。 */
+  .pwic .pwmono{width:var(--pwic,28px);height:var(--pwic,28px);border-radius:8px;
+    display:grid;place-items:center;font-size:calc(var(--pwic,28px) * .46);font-weight:700;
+    color:#0f1116;background:linear-gradient(160deg,#e9ecf4,#b9c2d4);pointer-events:none}
+  /* A–Z 那个角标（Launchy 的 "Power user keyboard shortcuts"）。设置里可关。 */
+  .pwic .pwkk{position:absolute;right:-3px;bottom:-3px;font-size:9px;font-weight:700;line-height:1;
+    padding:2px 4px;border-radius:5px;background:rgba(215,242,74,.95);color:#0f1116;
+    pointer-events:none;font-family:ui-monospace,Menlo,monospace}
+  /* 中轴下面那三行：选中的名字 → 来源 → 数量。
+     ⚠️ 它们在 Pet 的**正下方**（弧只走"左下→左→上"118°，下面这块是空的）——
+        放到正上方会被扇区压住。 */
+  .pwhub{position:absolute;left:0;top:56px;transform:translateX(-50%);white-space:nowrap;
+    font-size:12px;font-weight:600;color:#e9ecf4;background:rgba(12,14,20,.82);
+    padding:4px 10px;border-radius:9px;max-width:280px;overflow:hidden;text-overflow:ellipsis}
+  .pwhub.none{font-weight:400;color:rgba(233,236,244,.62)}
+  .pwsrc{position:absolute;left:0;top:82px;transform:translateX(-50%);white-space:nowrap;cursor:pointer;
+    font-size:10.5px;color:#cfd4e0;background:rgba(12,14,20,.72);border:1px solid rgba(255,255,255,.16);
+    padding:3px 9px;border-radius:8px}
+  .pwsrc:hover{border-color:rgba(215,242,74,.6);color:#eef2f8}
+  .pwsrc[data-src="all"]{border-color:rgba(215,242,74,.42)}
+  /* ⭐ "键盘通没通"当场看得见（读者：「按 C 打不开 chrome」——总得先分清是焦点没到还是字母没匹配） */
+  .pwkb{position:absolute;left:0;top:124px;transform:translateX(-50%);white-space:nowrap;
+    font-size:10px;padding:2px 8px;border-radius:7px;display:none;
+    color:#ffb4b4;background:rgba(60,12,12,.85);border:1px solid rgba(255,120,120,.35)}
+  body.pw-on .pwkb{display:block}
+  body.pw-on.pw-kb .pwkb{color:#d7f24a;background:rgba(24,34,12,.85);border-color:rgba(215,242,74,.4)}
+  .pwmore{position:absolute;left:0;top:104px;transform:translateX(-50%);white-space:nowrap;
+    font-size:10px;color:rgba(233,236,244,.55)}
+
+  /* ══ 右键：正在运行的软件清单（勾选 → 一起退掉）══════════════
+     读者 2026-10-10 深夜：「右键不要是打开设置了，是一个**勾选列表**，目前所有的软件，
+     可以勾选然后点 delete 就都退出掉」。
+     ⚠️ 它是 `#pet` 的**兄弟**，不是子元素 —— 两个原因：
+       ① 子元素会被 `position:fixed` 的 `#pet` 当成包含块（fixed 后代会以它为原点），
+          那样这块面板只能长在 104px 宽的那个小家伙里；
+       ② 挂在 `#pet` 里的话，按下去会**启动拖拽状态机**（pointerdown 在 #pet 上）。
+     窗口是 440×520，所以它摆在左上、宠物的对面。 */
+  .pwq{position:fixed;left:12px;top:12px;width:296px;max-height:496px;display:none;
+    flex-direction:column;overflow:hidden;color:#e9ecf4;font-size:12.5px;
+    background:rgba(16,18,24,.95);border:1px solid rgba(255,255,255,.16);border-radius:14px;
+    box-shadow:0 18px 50px rgba(0,0,0,.55);
+    -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+  body.pwq-on .pwq{display:flex}
+  .pwqhd{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.12)}
+  .pwqhd b{font-size:12.5px;font-weight:600;flex:1}
+  .pwqx{border:0;background:transparent;color:rgba(233,236,244,.65);cursor:pointer;font-size:13px;padding:2px 4px}
+  .pwqx:hover{color:#fff}
+  .pwqlist{flex:1;overflow:auto;padding:6px}
+  .pwqrow{display:flex;align-items:center;gap:9px;padding:6px 7px;border-radius:9px;cursor:pointer}
+  .pwqrow:hover{background:rgba(255,255,255,.09)}
+  .pwqrow input{width:auto;accent-color:#d7f24a;flex:none}
+  .pwqrow img{width:22px;height:22px;object-fit:contain;flex:none}
+  .pwqrow .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pwqempty{padding:14px;color:rgba(233,236,244,.6);text-align:center}
+  .pwqbar{display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid rgba(255,255,255,.12)}
+  .pwqbar button{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#e9ecf4;
+    border-radius:8px;padding:5px 9px;font-size:11.5px;cursor:pointer}
+  .pwqbar button:hover{border-color:rgba(215,242,74,.55)}
+  .pwqbar .pwqsp{flex:1}
+  /* ⚠️ 退出是**破坏性**动作 ⇒ 颜色上就分得出（红），别和"全选"长得一样 */
+  .pwqbar button.danger{background:rgba(255,86,86,.18);border-color:rgba(255,86,86,.55);color:#ffd9d9}
+  .pwqbar button.danger:hover{background:rgba(255,86,86,.3)}
+  .pwqbar button:disabled{opacity:.4;cursor:default}
+  .pwqfoot{display:flex;align-items:center;gap:8px;padding:0 10px 9px;font-size:10.5px;color:rgba(233,236,244,.68)}
+  .pwqfoot button{border:0;background:transparent;color:rgba(215,242,74,.9);cursor:pointer;font-size:10.5px;padding:2px 0}
+  .pwqfoot span{flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+</head>
+<body class="pet-on pet-onlynone">
+  <div class="pet" id="pet" title="鼠标放上来展开轮盘 · 拖动挪位置 · 右键是正在运行的软件清单 · Esc 收起">
+    <div class="petbubble" id="petbubble"></div>
+    <div class="pw" id="pw">
+      <div class="pwwheel" id="pwwheel"></div>
+      <div class="pwhub" id="pwhub">选一个…</div>
+      <div class="pwsrc" id="pwsrc">正在运行</div>
+      <div class="pwmore" id="pwmore"></div>
+      <div class="pwkb" id="pwkb">键盘未接通</div>
+    </div>
+    <div class="petbody" id="petbody"></div>
+  </div>
+  <!-- ⚠️ 是 `#pet` 的**兄弟**（原因见上面那段 CSS 注释） -->
+  <div class="pwq" id="pwq">
+    <div class="pwqhd"><b id="pwqn">正在运行</b><button class="pwqx" id="pwqx" title="关掉（Esc）">×</button></div>
+    <div class="pwqlist" id="pwqlist"></div>
+    <div class="pwqbar">
+      <button id="pwqall">全选</button>
+      <button id="pwqnone">清空</button>
+      <span class="pwqsp"></span>
+      <button id="pwqgo" class="danger" disabled>退出勾选的</button>
+    </div>
+    <div class="pwqfoot"><button id="pwqset">Pet 设置…</button><span id="pwqmsg"></span></div>
+  </div>
+  <script type="module" src="/ui/pet.js"></script>
+</body>
+</html>
