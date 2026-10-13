@@ -1081,12 +1081,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered, defer: false)
             w.title = "cevtuo-c4emem"
-            // ⚠️⚠️ 读者 2026-10-13：「这个软件的**最上边不应该是黑色的一条**」。
-            //    界面自己**永远是浅色**（app.css 的 `--bg:#f7f7f4`，而且那里**没有**
-            //    `prefers-color-scheme` 分支），而读者的 Mac 是深色模式 ⇒ 系统给窗口
-            //    画的标题条是**黑的**，顶上就横着一条黑。
-            //    ⇒ 把窗口外观钉死成浅色（和页面同一条路），别再跟系统走。
-            w.appearance = NSAppearance(named: .aqua)
+            // ⚠️⚠️⚠️ 2026-10-13 **撤掉**：这里原来是 `w.appearance = NSAppearance(named: .aqua)`
+            //    （为了让"顶上那条黑的"消失）。读者随后报「打开就整片白」，
+            //    而白屏的成因查下来是**页面活着、但画不出来**（合成停了）——
+            //    两件事在时间上完全重合 ⇒ 按"一次只动一个变量"先把外观那一句撤掉。
+            //
+            //    ⭐ 顶上那条黑改用**不碰外观**的标准做法：
+            //      标题栏透明（`titlebarAppearsTransparent`）⇒ 标题栏取**窗口底色**
+            //      （下面设成页面那张纸色 #f7f7f4），系统是深色还是浅色都不影响它。
+            w.titlebarAppearsTransparent = true
             // ⚠️ 页面底色是 #f7f7f4：给它同一个底色，加载那一秒就不是"刺眼的白"，
             //    看起来像"正在铺纸"，而不是"坏了"。
             w.backgroundColor = NSColor(calibratedRed: 0xf7/255.0, green: 0xf7/255.0, blue: 0xf4/255.0, alpha: 1)

@@ -5010,3 +5010,81 @@ window.__app = {
   get shelf() { return shelf; }, get kbView() { return kbView; },
   get flowReady() { return flowReady; },
 };
+
+
+// ── watchdog 看门狗（2026-10-13 临时加的，用来抓"整片变白"）────────
+// ⚠️ 每 2 秒报一次：**现在有哪些元素几乎铺满视口**、body 底色是什么、路由在哪。
+//    白屏那种故障看代码看不出来，只能让它自己说。
+const wlog = (m) => { try { fetch('/api/client-log?m=' + encodeURIComponent('watch: ' + m)); } catch { /* 连不上就算了 */ } };
+setInterval(() => {
+  try {
+    const vw = innerWidth, vh = innerHeight;
+    const covers = [];
+    document.querySelectorAll('body *').forEach((e) => {
+      const cs = getComputedStyle(e);
+      if (cs.position !== 'fixed' && cs.position !== 'absolute') return;
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.05) return;
+      const r = e.getBoundingClientRect();
+      if (r.width >= vw * 0.9 && r.height >= vh * 0.9) {
+        covers.push((e.id || (typeof e.className === 'string' ? e.className : e.tagName)) + '[' + cs.backgroundColor + ' op' + cs.opacity + ' z' + cs.zIndex + ']');
+      }
+    });
+    const sprite = !!document.getElementById('c4-icons');
+    const uses = document.querySelectorAll('use').length;
+    const icons = document.querySelectorAll('svg.ic').length;
+    // ⚠️ 这几项是读者 2026-10-13 给的线索：**同一个页面，浏览器里图标都在、App 里没有**。
+    //    sprite 在不在、`<use>` 有几个、画出来的图标有几个 —— 一眼就能定位断在哪一环。
+    wlog('vw=' + vw + 'x' + vh + ' sprite=' + sprite + ' uses=' + uses + ' svgIc=' + icons +
+         ' htmlLen=' + document.body.innerHTML.length +
+         ' text=' + document.body.innerText.trim().length + ' hash=' + (location.hash || '-') +
+         ' bodyBg=' + getComputedStyle(document.body).backgroundColor +
+         ' covers=' + (covers.length ? covers.slice(0, 5).join(' ; ') : '—'));
+  } catch (e) { wlog('ERR ' + e.message); }
+}, 30000);   // ⚠️ 原来是 2 秒一次 —— 排查完就降到 30 秒，别把 client.log 刷满
+             //    （rAF 探针不受影响：它只在**真的停了**的时候才写一行）
+
+
+// ── 一次性：把前几个图标的**真实几何**报出来（2026-10-13 查"App 里没图标"）──
+//    读者线索：同一个页面，浏览器里图标都在、App 里没有。DOM 里有 216 个，
+//    所以只能量"它到底占没占地方、描边算出来是什么"。
+setTimeout(() => {
+  try {
+    const out = [];
+    document.querySelectorAll('svg.ic').forEach((el, i) => {
+      if (i > 4) return;
+      const r = el.getBoundingClientRect();
+      const u = el.querySelector('use');
+      let bb = 'n/a';
+      try { const b = u.getBBox(); bb = Math.round(b.width) + 'x' + Math.round(b.height); } catch (e) { bb = 'ERR'; }
+      const cs = getComputedStyle(el);
+      out.push('#' + i + ' rect=' + Math.round(r.width) + 'x' + Math.round(r.height) +
+               ' useBBox=' + bb + ' color=' + cs.color + ' w=' + cs.width + ' fs=' + cs.fontSize);
+    });
+    fetch('/api/client-log?m=' + encodeURIComponent('icons: ' + out.join(' | ')));
+  } catch (e) { fetch('/api/client-log?m=' + encodeURIComponent('icons ERR ' + e.message)); }
+}, 4000);
+
+// ── rAF 探针：合成器停了就自己重载（2026-10-13）────────────────────
+// ⚠️⚠️ 读者报的"整片变白"查下来是**页面活着、但画不出来**：
+//    看门狗（每 2 秒一次 `setInterval`）全程正常、DOM 完整、没有任何元素盖住视口，
+//    可窗口就是白的 —— 说明 **JS 在跑、合成/绘制停了**（WebKit 的 GPU 侧出问题）。
+//    ⚠️ 这种情况下**没有任何 App 层回调会响**（WebContent 进程好好的），
+//      所以 App 那边无从知道，用户看到的就是"永远白着"。
+//
+//    ⇒ 用 `requestAnimationFrame` 当探针：**合成停的时候它就不回调了**
+//      （rAF 是由显示刷新驱动的）。超过 3 秒没回调、而且文档是可见的 ⇒ 自己 reload。
+//      ⚠️ 必须用 `document.visibilityState` 挡一下：窗口被遮住/最小化时 rAF 本来就不跑，
+//         那不是故障，重载只会白白闪一下。
+(function rafWatchdog() {
+  let last = Date.now();
+  const tick = () => { last = Date.now(); requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') { last = Date.now(); return; }
+    const gap = Date.now() - last;
+    if (gap > 3000) {
+      try { fetch('/api/client-log?m=' + encodeURIComponent('rAF 停了 ' + gap + 'ms ⇒ 自动重载')); } catch { /* 连不上就算了 */ }
+      location.reload();
+    }
+  }, 1500);
+})();

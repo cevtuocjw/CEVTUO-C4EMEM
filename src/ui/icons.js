@@ -110,14 +110,15 @@ const defs = Object.entries(P)
   .map(([n, d]) => `<symbol id="i-${n}" viewBox="0 0 24 24" ${STYLE}><path d="${d}"/></symbol>`)
   .join('');
 
+// ⚠️⚠️⚠️ 2026-10-13：这里原来有一层**定义了却没人引用**的 `<filter id="rough">`
+//    （`feTurbulence` + `feDisplacementMap`，就是"手绘粗糙感"那层）。
+//    读者报的现象是：**同一个页面，浏览器里图标都在、App（WKWebView）里一个都不显示**；
+//    在 App 里量过 —— `svg.ic` 的 rect 和 `use` 的 getBBox **都是正常的**
+//    （`rect=14x14 useBBox=4x10`），也就是**布局在、绘制没发生**。
+//    WebKit 对文档里带湍流滤镜的 SVG 有已知的合成问题，而**它根本没被任何元素引用** ⇒
+//    删掉它不改变任何视觉，先按"一次只动一个变量"把它拿掉。
+//    ⚠️ 真要那层粗糙感，做法应该是把噪声**烘进路径坐标**，不是在文档里挂一个湍流滤镜。
 export const SPRITE = `<svg id="c4-icons" width="0" height="0" aria-hidden="true" style="position:absolute">
-<defs>
-  <!-- 手绘感的那层：低频噪声 + 位移。路径本身也是歪的，两个叠起来才像笔划 -->
-  <filter id="rough" x="-16%" y="-16%" width="132%" height="132%">
-    <feTurbulence type="fractalNoise" baseFrequency="0.052" numOctaves="3" seed="11" result="n"/>
-    <feDisplacementMap in="SourceGraphic" in2="n" scale="2.1" xChannelSelector="R" yChannelSelector="G"/>
-  </filter>
-</defs>
 ${defs}
 </svg>`;
 
