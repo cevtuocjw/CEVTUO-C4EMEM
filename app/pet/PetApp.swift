@@ -1,5 +1,5 @@
 /**
- * CEVTUO Pet —— **独立的桌面宠物 App**。
+ * CEVTUO-PET —— **独立的桌面宠物 App**。
  *
  * 读者 2026-10-13：
  *   「cevtuopet **单独打包制作一个 macos 软件**，logo 就用那个铅，单独一个分发，
@@ -693,8 +693,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard UserDefaults.standard.object(forKey: kMenuOnKey) == nil
                 ? true : UserDefaults.standard.bool(forKey: kMenuOnKey) else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "pencil.tip", accessibilityDescription: "CEVTUO Pet")
-            ?? NSImage(systemSymbolName: "sparkles", accessibilityDescription: "CEVTUO Pet")
+        // ⭐ 菜单栏那颗 = **一枚圈 + 里面那朵小花**（和 App 图标同一套品牌）。
+        //   ⚠️⚠️ 原来是 `pencil.tip`（读者：「导航栏那个 logo 现在是一个**圆规**」
+        //      —— 他说得对，那支铅笔看着就是圆规）。
+        //   ⚠️ 菜单栏要的是**单色模板图**（`isTemplate = true`，macOS 自己按深浅色上色）：
+        //      把那张彩色照片塞进来会变成一块糊的黑方块，而且深浅色下都不自适应。
+        //      ⇒ 模板图是另画的一张（`app/make-menubar.py`），不是图标缩一缩。
+        if let u = Bundle.main.url(forResource: "menubar", withExtension: "png"),
+           let im = NSImage(contentsOf: u) {
+            im.isTemplate = true
+            im.size = NSSize(width: 20, height: 20)
+            item.button?.image = im
+        } else {
+            item.button?.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "CEVTUO-PET")
+        }
         item.button?.image?.isTemplate = true
         let menu = NSMenu()
         menu.addItem(withTitle: "显示 / 隐藏 Pet", action: #selector(togglePet), keyEquivalent: "p").target = self
@@ -702,7 +714,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         menu.addItem(.separator())
         menu.addItem(withTitle: "打开数据目录", action: #selector(openDataDir), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "退出 CEVTUO Pet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: "退出 CEVTUO-PET", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
         statusItem = item
     }
@@ -719,7 +731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 660),
                              styleMask: [.titled, .closable, .resizable, .miniaturizable],
                              backing: .buffered, defer: false)
-            w.title = "CEVTUO Pet 设置"
+            w.title = "CEVTUO-PET 设置"
             w.center()
             let cfg = WKWebViewConfiguration()
             cfg.userContentController.add(self, name: "c4")

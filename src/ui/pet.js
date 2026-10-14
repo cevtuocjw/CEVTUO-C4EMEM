@@ -109,6 +109,9 @@ function buildCard(el) {
 import { buildSlab, SLAB_LAYERS } from './petslab.js';
 void SLAB_LAYERS;
 
+/** ⭐ 转一圈几秒（设置里那个转速滑杆）。⚠️ 缺省必须和 petsettings.html 的 SPEED_DEF 一样 */
+const SPEED_DEF = 18;
+const petPeriod = () => { const v = Number(petPref().period); return v >= 4 && v <= 40 ? v : SPEED_DEF; };
 function renderPet() {
   const p = petPref();
   const spin = p.spin !== false;      // 默认转：只有**明确写了 false** 才停
@@ -173,7 +176,7 @@ async function mount3d(f, spin) {
   const c = $('#pet3dc');
   if (!c) return;
   try {
-    const m = await PET3D.mountPet3D(c, f.img, f.depth, { spin });
+    const m = await PET3D.mountPet3D(c, f.img, f.depth, { spin, period: petPeriod() });
     if (token !== renderSeq) { m.dispose(); return; }   // 期间又换了一次 ⇒ 这只作废
     T3 = m;
     report(`3d 挂上了 ${f.nm} tris=${m.tris} spin=${spin}`);

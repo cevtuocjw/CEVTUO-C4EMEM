@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>CEVTUO Pet 设置</title>
+<title>CEVTUO-PET 设置</title>
 <!-- ⚠️ 这一页住在**设置窗**里（Swift 那个普通 NSWindow），不是桌面上那个透明小窗。
      所以它**要**有底色 —— 透明那套只属于 pet.html。 -->
 <link rel="stylesheet" href="/ui/app.css">
@@ -61,7 +61,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>CEVTUO Pet</h1>
+  <h1>CEVTUO-PET</h1>
   <div class="sub">桌面上那个小家伙的设置。<b>它和 cevtuo-c4emem 共用同一个引擎</b> —— 所以这里聊出来的东西，在 c4emem 里也在。</div>
 
   <!-- ── 模式 ── -->
@@ -87,8 +87,16 @@
     <div class="row" style="margin-top:12px">
       <label>转不转</label>
       <input type="checkbox" id="spinOn">
-      <span class="k">关掉它就定住不动（<b>默认是转的</b>）。2D 那几种我给它叠了厚度，
-        转起来像有厚度的东西；不叠的话侧过去就是一张纸。</span>
+      <span class="k">关掉它就定住不动（<b>默认是转的</b>）。
+        关掉的时候它**正对着你**，不是冻在某个看不出来是什么的侧角。</span>
+    </div>
+    <!-- ⭐ 转速（读者 2026-10-14：「增加一个旋转速度调节在设置里」）。
+         ⚠️ 存的是**秒/圈**（period），不是"1..5 档" —— 档位是个中间量，
+            换个形态就得重新映射一次；秒是物理量，谁都读得懂。 -->
+    <div class="row" style="margin-top:8px">
+      <label>转多快</label>
+      <input type="range" id="spinSpeed" min="4" max="40" step="1" style="width:190px">
+      <span class="k" id="spinSpeedTxt"></span>
     </div>
   </div>
 
@@ -282,6 +290,18 @@ function paintFormChips() {
 }
 /** ⚠️ 默认**转** —— 只有明确存了 false 才不转（否则"没设置过"会被当成"关"）。 */
 function paintSpin() { $('#spinOn').checked = petPref().spin !== false; }
+/** 转一圈要几秒。⚠️ 默认 18 秒 —— 和 pet3d.js 里那个默认值**必须一样**，
+ *  不一样的话"设置里显示 18 秒"和"实际转 22 秒"会各说各话。 */
+const SPEED_DEF = 18;
+const paintSpeed = () => {
+  const v = Number(petPref().period) || SPEED_DEF;
+  $('#spinSpeed').value = String(v);
+  // ⚠️ 把**秒数**写出来（不要只给一个 1~10 的档位）——用户要能对得上自己看到的速度
+  $('#spinSpeedTxt').textContent = v <= 8 ? `很快 · 转一圈 ${v} 秒`
+    : v <= 16 ? `偏快 · 转一圈 ${v} 秒`
+      : v <= 24 ? `正常 · 转一圈 ${v} 秒`
+        : `很慢 · 转一圈 ${v} 秒`;
+};
 function paintForms() {
   document.querySelectorAll('.fchip').forEach((c) => c.classList.toggle('on', c.dataset.id === curForm));
   const f = PET_FORMS.find((x) => x.id === curForm);
@@ -290,6 +310,7 @@ function paintForms() {
 }
 await loadForms();
 paintSpin();
+paintSpeed();
 
 // ── 模型 ─────────────────────────────────────────────────────
 api('/api/settings').then((s) => {
@@ -654,6 +675,19 @@ $('#spinOn').onchange = () => {
   petSave({ spin: $('#spinOn').checked });
   bridge({ cmd: 'reloadPet' });
   $('#mkmsg').textContent = $('#spinOn').checked ? '它会转。' : '定住了。';
+};
+
+// ⭐ 转速：**拖的时候只回显、松手才落盘** —— 每拖一格都 reload 宠物的话，
+//   那只 Pet 会一格一闪（这个项目刚为"闪"折腾过一轮，别再自己造一个）。
+$('#spinSpeed').oninput = () => {
+  const v = Number($('#spinSpeed').value) || SPEED_DEF;
+  petSave({ period: v });
+  paintSpeed();
+};
+$('#spinSpeed').onchange = () => {
+  petSave({ period: Number($('#spinSpeed').value) || SPEED_DEF });
+  bridge({ cmd: 'reloadPet' });
+  $('#mkmsg').textContent = '转一圈 ' + (Number($('#spinSpeed').value) || SPEED_DEF) + ' 秒。';
 };
 
 $('#mksave').onclick = async () => {

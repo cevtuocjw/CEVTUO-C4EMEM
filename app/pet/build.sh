@@ -34,15 +34,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>$NAME</string>
-  <key>CFBundleDisplayName</key><string>CEVTUO Pet</string>
+  <key>CFBundleDisplayName</key><string>CEVTUO-PET</string>
   <key>CFBundleExecutable</key><string>$NAME</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <!-- ⚠️ 和 c4emem **不能一样** —— 同 bundle id 的两份副本会让
        LaunchServices / `open -a` 认哪个全凭运气（表现是"点了图标没反应"）。 -->
   <key>CFBundleIdentifier</key><string>com.cevtuo.pet</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.5</string>
-  <key>CFBundleVersion</key><string>6</string>
+  <key>CFBundleShortVersionString</key><string>0.1.6</string>
+  <key>CFBundleVersion</key><string>7</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
@@ -115,6 +115,10 @@ fi
 #    Finder 里一个白纸图标（而"长得丑"和"没做"在界面上是一样的）。
 if [ -f "$HERE/AppIcon.icns" ]; then
   cp "$HERE/AppIcon.icns" "$RES/AppIcon.icns"
+  # ⭐ 菜单栏那颗（模板图）—— 少了它 Swift 那边会退回一个 SF Symbol，而**没人会知道**
+  for f in menubar.png menubar@2x.png; do
+    [ -f "$HERE/$f" ] && cp "$HERE/$f" "$RES/$f" || echo "⚠️ 缺 app/pet/$f（菜单栏会退回一个系统图标）"
+  done
 else
   echo "⚠️ 没有 app/pet/AppIcon.icns（跑一下 bun app/pet/make-icon.mjs）—— 这一版会是白纸图标"
 fi
