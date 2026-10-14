@@ -1303,6 +1303,7 @@ const server = Bun.serve({
           id: x.id, nm: x.nm, w: x.w, h: x.h, cover: x.cover, ts: x.ts, from: x.from,
           img: `/pets/${x.id}.png`,
           ...(x.depth ? { depth: `/pets/${x.id}.depth.png`, depthW: x.depthW || 512, depthH: x.depthH || 512 } : {}),
+          ...(x.depth && x.tune ? { tune: x.tune } : {}),
         }));
         return json({ items });
       }

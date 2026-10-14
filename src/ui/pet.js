@@ -61,7 +61,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 
 // ⚠️ 名单**搬到 `petforms.js`** 了 —— 设置页也要它，两份必然漂移，
 //    而漂移的症状是「设置里选了、Pet 变空白」且**一个错都不报**。
-import { PET_FORMS, formOf } from './petforms.js';
+import { PET_FORMS, formOf, migratePetPrefs } from './petforms.js';
+migratePetPrefs();   // ⚠️ 必须在**第一次读偏好之前**跑（见 petforms.js 那段）
 // ⭐ 2D→**真 3D** 的那条路 —— 和设置页**共用同一份**（`src/ui/pet3d.js`）。
 //    ⚠️ 模块本身很轻（真正的重件是里面的**动态** import：three 1.2MB、深度模型 19MB）。
 import * as PET3D from './pet3d.js';
@@ -113,7 +114,8 @@ void SLAB_LAYERS;
 const SPEED_DEF = 18;
 const petPeriod = () => { const v = Number(petPref().period); return v >= 2 && v <= 40 ? v : SPEED_DEF; };   // ⚠️ 下限是 **2**（读者指定）——写成 4 的话「最快 2 秒」会被静默换成 18 秒
 /** ⭐ 怎么转：'swing' = 摆（120° 弧）/ 'full' = 连续 360°。⚠️ 三个地方口径必须一样 */
-const petMode = () => (petPref().mode === 'full' ? 'full' : 'swing');
+const petMode = () => { const v = petPref().spinMode;
+  return ['full', 'swing120', 'swing90', 'swing60'].includes(v) ? v : 'swing120'; };
 function renderPet() {
   const p = petPref();
   const spin = p.spin !== false;      // 默认转：只有**明确写了 false** 才停
@@ -178,7 +180,8 @@ async function mount3d(f, spin) {
   const c = $('#pet3dc');
   if (!c) return;
   try {
-    const m = await PET3D.mountPet3D(c, f.img, f.depth, { spin, period: petPeriod(), mode: petMode() });
+    const m = await PET3D.mountPet3D(c, f.img, f.depth,
+      { spin, period: petPeriod(), mode: petMode(), ...(f.tune || {}) });
     if (token !== renderSeq) { m.dispose(); return; }   // 期间又换了一次 ⇒ 这只作废
     T3 = m;
     report(`3d 挂上了 ${f.nm} tris=${m.tris} spin=${spin}`);

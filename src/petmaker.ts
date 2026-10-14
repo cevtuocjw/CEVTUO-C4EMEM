@@ -27,6 +27,12 @@ export interface MadePet {
    */
   depth?: string;
   depthW?: number; depthH?: number;
+  /**
+   * ⭐ 用户**改到满意**的那三个量（起伏 / 毛边 / 补镂空）。
+   *    ⚠️ 必须跟着这一只存下来 —— 不然设置页里调好了、桌面上那只又按默认值重建成另一个样子，
+   *       而**两个地方各自看都正常**（这个项目在"名单/材质"上栽过同一个形状）。
+   */
+  tune?: { depth?: number; edge?: number; fill?: boolean };
 }
 
 const dirOf = (dataDir: string) => join(dataDir, 'pets');
@@ -61,7 +67,7 @@ const slug = (s: string) => {
  * 把浏览器抠好的一张图存成一个形态。
  * ⚠️ `cover`（主体占画布的比例）**要一起存** —— 它是"抠过头了没有"的唯一现成判据。
  */
-export function savePet(dataDir: string, body: { name?: string; dataUrl?: string; cover?: number; w?: number; h?: number; from?: string; depth?: string; depthW?: number; depthH?: number }) {
+export function savePet(dataDir: string, body: { name?: string; dataUrl?: string; cover?: number; w?: number; h?: number; from?: string; depth?: string; depthW?: number; depthH?: number; tune?: { depth?: number; edge?: number; fill?: boolean } }) {
   const name = String(body.name || '').trim().slice(0, 24);
   if (!name) return { ok: false as const, error: '先给它起个名字' };
   const m = String(body.dataUrl || '').match(/^data:image\/png;base64,(.+)$/);
@@ -100,6 +106,15 @@ export function savePet(dataDir: string, body: { name?: string; dataUrl?: string
     id, nm: name, file, w: Number(body.w || 0), h: Number(body.h || 0),
     cover: Number(body.cover || 0), ts: new Date().toISOString(), from: String(body.from || ''),
     ...(depth ? { depth, depthW: Number(body.depthW || 512), depthH: Number(body.depthH || 512) } : {}),
+    // ⚠️ 只收**有限数**：NaN/字符串进到这里会让 three 那边算出 NaN 顶点，
+    //    表现是"整只不见了"，而且**不报错**。
+    ...(body.tune && typeof body.tune === 'object' ? {
+      tune: {
+        ...(Number.isFinite(Number(body.tune.depth)) ? { depth: Number(body.tune.depth) } : {}),
+        ...(Number.isFinite(Number(body.tune.edge)) ? { edge: Number(body.tune.edge) } : {}),
+        fill: body.tune.fill !== false,
+      },
+    } : {}),
   };
   reg.items.unshift(item);
   reg.removed = reg.removed.filter((x) => x !== id);

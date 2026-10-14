@@ -96,11 +96,13 @@
     <!-- ⭐ 怎么转（读者 2026-10-14：「给出来 120 度转回还是连续 360 度转的选项」）-->
     <div class="row" style="margin-top:8px">
       <label>怎么转</label>
-      <select id="spinMode" style="min-width:190px">
-        <option value="swing">摆过来摆过去（120° 的弧）</option>
-        <option value="full">连续转（整整一圈 360°）</option>
+      <select id="spinMode" style="min-width:210px">
+        <option value="swing120">摆 · 120°（摆幅最大，最像"转过身"）</option>
+        <option value="swing90">摆 · 90°</option>
+        <option value="swing60">摆 · 60°（摆幅最小，最安静）</option>
+        <option value="full">连续转 · 整整一圈 360°</option>
       </select>
-      <span class="k">「摆」是从侧面看它转过身的样子；「连续转」是一直往一个方向转圈。</span>
+      <span class="k">「摆」是转过去再转回来；「连续转」是一直往一个方向转圈。</span>
     </div>
     <!-- ⭐ 转速。⚠️ 最快 2 秒（读者指定）；单位是**秒**，而且跟着上面那个模式走：
          「摆」= 一次来回几秒，「连续转」= 转一圈几秒。 -->
@@ -154,25 +156,34 @@
       <button class="ghost" id="mkprobe">看看有什么</button></div>
     <div id="mklist" class="mklist"></div>
     <div id="mkprev" class="mkprev"></div>
+    <!-- ⭐⭐ 读者 2026-10-14：「我的本意是你给出来这个 3D 图之后**我跟你沟通你来修改**，
+         例如后边的**镂空了，需要补满**等，**修改好了我说确定**，你就处理好了最终稿。」
+         ⇒ 能改的就这三件（都是**确定性的量**，改完立刻能在上面那个预览里看见）：
+           起伏 / 毛边 / 补镂空。改满意了再按「做出来」。
+         ⚠️ 对话那一版没做 —— 那要接模型 + 多轮状态，而且"改哪几个量"最终还是这三件；
+            先把手能拧的旋钮给出来。 -->
+    <div id="mktune" style="display:none">
+      <div class="row"><label>起伏</label>
+        <input type="range" id="tuneDepth" min="10" max="60" step="2" style="width:150px">
+        <span class="k" id="tuneDepthTxt"></span></div>
+      <div class="row"><label>毛边</label>
+        <input type="range" id="tuneEdge" min="30" max="95" step="5" style="width:150px">
+        <span class="k" id="tuneEdgeTxt"></span></div>
+      <div class="row"><label>补镂空</label>
+        <input type="checkbox" id="tuneFill" checked>
+        <span class="k">把它内部被抠穿的洞**填满**（读者举例的那个）</span></div>
+    </div>
     <div class="row" id="mkname" style="display:none"><label>它叫什么</label>
-      <input id="mknamein" placeholder="比如：银玫瑰"><button class="go" id="mksave">做出来，装上去</button></div>
+      <input id="mknamein" placeholder="比如：银玫瑰"><button class="go" id="mksave">就它了，装上去</button></div>
     <div class="k" id="mkmsg"></div>
   </div>
 
-  <!-- ── 跟它说 ── -->
-  <div class="card sec">
-    <div class="m">跟它说 · 让它帮你做个东西</div>
-    <div class="k" style="margin-bottom:8px">像跟人说话那样。聊清楚"要读哪里、做成什么样"，
-      它会给你一份可执行的做法 —— 按一下<b>真的做出来</b>（读真的文件、进真的库、报真的条数）。</div>
-    <div id="chat"></div>
-    <div class="row" style="margin-top:8px">
-      <input id="q" placeholder="比如：把我 OneDrive 那个文件夹做成一个来源，叫 zronedrive">
-      <button class="go" id="send">发送</button>
-    </div>
-    <div id="specslot"></div>
-    <div class="k" id="makemsg"></div>
-  </div>
-
+  <!-- ── 「跟它说」那张卡**收起来了**（读者 2026-10-14：「这一块应该没有」）──
+       ⚠️ 它讲的是"把 OneDrive 做成一个来源"，和 Pet 没关系。
+         读者的本意是**对着刚做出来的那一只 3D 提修改意见**，改到满意再说"确定" ——
+         那件事现在在「一起造一只新的」那张卡里（预览下面那三个旋钮）。
+       ⚠️ 元素留在 DOM 里但**不显示**：那段 JS 一碰 `#chat` 就会抛，
+         删掉标记而不删脚本 = 整个设置页从那行开始全不执行（而且**不报错**）。 -->
   <div class="k" style="text-align:center;margin-top:22px">日志：<code>~/.c4emem/pet.log</code> · 核心：<code>~/.c4emem/core.log</code></div>
 </div>
 
@@ -211,7 +222,8 @@ api('/api/apps').then((a) => {
 // ── 形态（和 pet.js **共用同一份名单**）────────────────────────
 // ⚠️ 名单住在 `/ui/petforms.js`，两边都 import 它 —— 各写一份必然漂移，
 //    而漂移的症状是「这里能选、选了 Pet 变空白」，且一个错都不报。
-import { PET_FORMS } from '/ui/petforms.js';
+import { PET_FORMS, migratePetPrefs } from '/ui/petforms.js';
+migratePetPrefs();   // ⚠️ 见 petforms.js：mode 那个键我用重了，先把数据修回来
 // ⭐ 2D → **真 3D**（读者 2026-10-14：「不是仅仅加厚」）。
 //    深度模型在这里跑**一次**（约 4 秒），结果存成一张灰度 PNG 跟着这只 Pet 走；
 //    桌面上那只 Pet 的窗口**不跑模型**，它只读那张图。
@@ -304,9 +316,14 @@ function paintSpin() { $('#spinOn').checked = petPref().spin !== false; }
 /** 转一圈要几秒。⚠️ 默认 18 秒 —— 和 pet3d.js 里那个默认值**必须一样**，
  *  不一样的话"设置里显示 18 秒"和"实际转 22 秒"会各说各话。 */
 const SPEED_DEF = 18;
+/** ⚠️ 转法存的是 **spinMode**（不是 `mode` —— `mode` 是宠物的工作模式，见 petforms.js）。 */
+const spinModeOf = () => {
+  const v = petPref().spinMode;
+  return ['full', 'swing120', 'swing90', 'swing60'].includes(v) ? v : 'swing120';
+};
 const paintSpeed = () => {
   const v = Number(petPref().period) || SPEED_DEF;
-  const mode = petPref().mode === 'full' ? 'full' : 'swing';
+  const mode = spinModeOf();
   $('#spinSpeed').value = String(v);
   $('#spinMode').value = mode;
   // ⚠️ 把**秒数**和**这一圈指什么**一起写出来 —— 只写"偏快"的话，
@@ -324,6 +341,10 @@ function paintForms() {
 await loadForms();
 paintSpin();
 paintSpeed();
+// ⚠️ 默认值必须和 pet3d.js 的 DEPTH_AMP / EDGE_TAPER **一样** ——
+//    不一样的话"预览按 A 画、存下来按 B 画"，两个地方各自看都正常。
+$('#tuneDepth').value = '30';   // = DEPTH_AMP
+$('#tuneEdge').value = '62';    // = EDGE_TAPER
 
 // ── 模型 ─────────────────────────────────────────────────────
 api('/api/settings').then((s) => {
@@ -377,6 +398,13 @@ let mkDims = null;
  *    图太怪…），退回叠层照样能用；但界面上要**如实说**是哪一种。
  */
 let mkDepth = null;
+/** ⭐ 三个旋钮 → `mountPet3D` 的 opts（和存进 pets.json 的是同一份形状）。
+ *  ⚠️ 名字要能对上：`fillHoles` 是给渲染的，存下来叫 `fill`（短一点、进 JSON 好看）。 */
+const mkTune = () => ({
+  depth: Number($('#tuneDepth').value) / 100,
+  edge: Number($('#tuneEdge').value) / 100,
+  fillHoles: $('#tuneFill').checked,
+});
 /** 预览里那只转着的东西（换一张图要先 dispose，否则 WebGL 上下文会越积越多） */
 let mkT3 = null;
 
@@ -517,7 +545,8 @@ async function showPreview() {
       // ⚠️ 不传 `n` —— 用 pet3d.js 里那个默认值，**和桌面上那只一模一样**。
       //    传 160 的话预览和实际是两套几何（50,562 面 vs 79,202 面），
       //    "看到的不是拿到的"，而且**看不出哪里不对**。
-      mkT3 = await PET3D.mountPet3D($('#mk3dc'), mkCut.dataUrl, PET3D.depthToDataURL(mkDepth), { spin: rot });
+      mkT3 = await PET3D.mountPet3D($('#mk3dc'), mkCut.dataUrl, PET3D.depthToDataURL(mkDepth), { spin: rot, ...mkTune() });
+      $('#mktune').style.display = '';      // 有 3D 了才给旋钮 —— 没有 3D 的时候它们没意义
       const cap = $('#mk3dcap');
       if (cap) cap.textContent = '3D · ' + mkT3.tris.toLocaleString() + ' 个三角面 · ' + (rot ? '在转' : '定住了');
     } catch (e) {
@@ -702,11 +731,29 @@ $('#spinSpeed').onchange = () => {
   bridge({ cmd: 'reloadPet' });
 };
 $('#spinMode').onchange = () => {
-  petSave({ mode: $('#spinMode').value });
+  petSave({ spinMode: $('#spinMode').value });
   paintSpeed();
   bridge({ cmd: 'reloadPet' });
   $('#mkmsg').textContent = $('#spinMode').value === 'full' ? '它会一直转圈。' : '它摆过来摆过去。';
 };
+
+/* ⭐ 旋钮 → **立刻**重画预览。⚠️ 拖动时必须节流：`mountPet3D` 每次都要重建
+   8 万个面的几何，不节流的话拖一下卡一下（读起来像"软件卡死了"）。 */
+let tuneTimer = 0;
+function retunePreview() {
+  clearTimeout(tuneTimer);
+  tuneTimer = setTimeout(() => { if (mkDepth) showPreview(); }, 160);
+}
+for (const id of ['#tuneDepth', '#tuneEdge', '#tuneFill']) {
+  const el = $(id);
+  const upd = () => {
+    const d = Number($('#tuneDepth').value), e = Number($('#tuneEdge').value);
+    $('#tuneDepthTxt').textContent = `起伏 ${(d / 100).toFixed(2)}` + (d <= 18 ? '（很平）' : d >= 50 ? '（很深）' : '');
+    $('#tuneEdgeTxt').textContent = `收口 ${(e / 100).toFixed(2)}` + (e <= 40 ? '（毛边多）' : e >= 80 ? '（很干净）' : '');
+    retunePreview();
+  };
+  el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', upd);
+}
 
 $('#mksave').onclick = async () => {
   if (!mkCut) return;
@@ -716,7 +763,9 @@ $('#mksave').onclick = async () => {
   const r = await post('/api/pet/save', {
     name, dataUrl: mkCut.dataUrl, cover: mkCut.cover, w: mkCut.w, h: mkCut.h, from: mkSrc.from,
     // ⭐ 深度图一起存 —— 有它这只在桌面上才是**能转的真 3D**
-    ...(mkDepth ? { depth: PET3D.depthToDataURL(mkDepth), depthW: mkDepth.w, depthH: mkDepth.h } : {}),
+    ...(mkDepth ? { depth: PET3D.depthToDataURL(mkDepth), depthW: mkDepth.w, depthH: mkDepth.h,
+      // ⚠️ 存下来的是 `fill`（不是 `fillHoles`）—— 和 petmaker 那边收的形状对齐
+      tune: { depth: mkTune().depth, edge: mkTune().edge, fill: $('#tuneFill').checked } } : {}),
   });
   if (r.error) { $('#mkmsg').innerHTML = '<span class="bad">' + esc(r.error) + '</span>'; return; }
   $('#mkmsg').innerHTML = '<span class="ok">做好了：「' + esc(r.item.nm) + '」。</span>' +

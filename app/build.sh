@@ -38,8 +38,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>com.cevtuo.c4emem</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.31</string>
-  <key>CFBundleVersion</key><string>32</string>
+  <key>CFBundleShortVersionString</key><string>0.1.32</string>
+  <key>CFBundleVersion</key><string>33</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <!-- ⭐⭐ 2026-10-13 读者：「我点击这个软件，**没有 logo 在我的 dock 栏里展示**」。
        原来是 `LSUIElement=true`（纯菜单栏 App，Dock 里没有图标）—— 那是当初的设计，

@@ -2394,7 +2394,8 @@ function openLib(anchorEl) {
    **「设置里能选的新形态，主界面这只换过去是一片空白」**，且**一个错都不报**。
    （2026-10-14 实测：这份名单当时还停在 5 个内置形态，
    用户自己造的那些和 spin 开关它**一概不知道** —— 见下面 renderPet 的注释。） */
-import { PET_FORMS, formOf } from '/ui/petforms.js';
+import { PET_FORMS, formOf, migratePetPrefs } from '/ui/petforms.js';
+migratePetPrefs();   // ⚠️ 见 petforms.js：我自己把 mode 这个键用重了
 import * as PET3D from '/ui/pet3d.js';
 import { buildSlab } from '/ui/petslab.js';
 const BG_KEY = 'c4emem.bg';
@@ -2437,7 +2438,8 @@ async function loadMadePets() {
 const SPEED_DEF = 18;
 const petPeriod = () => { const v = Number(petPref().period); return v >= 2 && v <= 40 ? v : SPEED_DEF; };   // ⚠️ 下限是 **2**（读者指定）——写成 4 的话「最快 2 秒」会被静默换成 18 秒
 /** ⭐ 怎么转：'swing' = 摆（120° 弧）/ 'full' = 连续 360°。⚠️ 三个地方口径必须一样 */
-const petMode = () => (petPref().mode === 'full' ? 'full' : 'swing');
+const petMode = () => { const v = petPref().spinMode;
+  return ['full', 'swing120', 'swing90', 'swing60'].includes(v) ? v : 'swing120'; };
 function renderPet() {
   const p = petPref();
   const body = $('#petbody');

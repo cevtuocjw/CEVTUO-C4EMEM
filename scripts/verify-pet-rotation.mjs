@@ -19,7 +19,7 @@ p.on('pageerror', (e) => console.log('  [pageerror]', String(e).slice(0, 160)));
 
 async function sample(mode, period, ms) {
   await p.goto(B + '/ui/pet.html', { waitUntil: 'load' });
-  await p.evaluate(([m, per]) => localStorage.setItem('c4emem.pet', JSON.stringify({ form: 'silver', spin: true, mode: m, period: per })), [mode, period]);
+  await p.evaluate(([m, per]) => localStorage.setItem('c4emem.pet', JSON.stringify({ form: 'silver', spin: true, spinMode: m, period: per })), [mode, period]);
   await p.reload({ waitUntil: 'load' });
   await p.waitForFunction(() => { const c = document.querySelector('#pet3dc'); return c && c.__pet3d; }, { timeout: 60000 });
   await p.waitForTimeout(300);
@@ -83,7 +83,7 @@ console.log('② 「连续转」最快 2 秒也能到');
 
 console.log('③ 「摆」：幅度是 ±60°（120° 的弧），不是旧的 ±26°');
 {
-  const s = await sample('swing', 4, 4600);
+  const s = await sample('swing120', 4, 4600);
   const a = s.map((x) => x[1] * 180 / Math.PI);
   const mx = Math.max(...a), mn = Math.min(...a);
   ok(Math.abs(mx - 60) < 8, `最大摆到 +${mx.toFixed(1)}°（要 +60°）`);
@@ -91,10 +91,18 @@ console.log('③ 「摆」：幅度是 ±60°（120° 的弧），不是旧的 �
   ok(mx - mn > 100, `总弧度 ${(mx - mn).toFixed(1)}°（旧实现只有 52°）`);
 }
 
+console.log('③b 90° / 60° 也要真的按那幅度摆');
+for (const [m, half] of [['swing90', 45], ['swing60', 30]]) {
+  const s2 = await sample(m, 4, 4600);
+  const a = s2.map((x) => x[1] * 180 / Math.PI);
+  const mx = Math.max(...a);
+  ok(Math.abs(mx - half) < 6, `${m} 摆到 +${mx.toFixed(1)}°（要 +${half}°）`);
+}
+
 console.log('④ 「不转」还是**正对着**（这一条别被模式改动弄坏）');
 {
   await p.goto(B + '/ui/pet.html', { waitUntil: 'load' });
-  await p.evaluate(() => localStorage.setItem('c4emem.pet', JSON.stringify({ form: 'silver', spin: false, mode: 'full', period: 2 })));
+  await p.evaluate(() => localStorage.setItem('c4emem.pet', JSON.stringify({ form: 'silver', spin: false, spinMode: 'full', period: 2 })));
   await p.reload({ waitUntil: 'load' });
   await p.waitForFunction(() => { const c = document.querySelector('#pet3dc'); return c && c.__pet3d; }, { timeout: 60000 });
   await p.waitForTimeout(900);

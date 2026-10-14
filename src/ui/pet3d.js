@@ -123,7 +123,14 @@ function sample(img, n) {
  * @param img    已经 decode 完的 Image
  * @param depth  estimateDepth 的结果
  */
-export function buildGeometry(THREE, img, depth, n = N_GRID) {
+export function buildGeometry(THREE, img, depth, n = N_GRID, tune = {}) {
+  /* ⭐⭐ 三个可调的旋钮（读者 2026-10-14：「我给你一张 3D 图之后我跟你沟通你来修改，
+     例如**后边的镂空了需要补满**等，修改好了我说确定」）——
+     这里是"改"的落点：改的都是这几个**确定性的量**，不是重新生成一遍。
+     ⚠️ 每一档都要能在预览里**立刻看见**，否则"改到满意再确定"就是空话。 */
+  const FILL = tune.fillHoles !== false;   // 补镂空：把主体内部的孔洞填平
+  const EDGE = tune.edge != null ? Math.min(0.95, Math.max(0, tune.edge)) : EDGE_TAPER;
+  const DEPTH = tune.depth != null ? Math.min(0.8, Math.max(0.05, tune.depth)) : DEPTH_AMP;
   const px = sample(img, n);                     // RGBA：颜色 + alpha
   // 深度图也是 0..255 灰度，同样缩到 N×N
   const dc = document.createElement('canvas'); dc.width = depth.w; dc.height = depth.h;
@@ -155,6 +162,24 @@ export function buildGeometry(THREE, img, depth, n = N_GRID) {
     }
   }
 
+  // ⭐ 补镂空：从**四条边**泛洪，走不到的地方就是"主体内部的孔" ⇒ 填满。
+  //   ⚠️ 这和"抠底"是两件事：抠底去的是**外面**的背景，这一条补的是**里面**的洞
+  //      （读者原话「后边的**镂空了**，需要补满」）。
+  if (FILL) {
+    const out = new Uint8Array(n * n), st = [];
+    const push = (x, y) => { const k = y * n + x; if (!out[k] && !mask[k]) { out[k] = 1; st.push(x, y); } };
+    for (let x = 0; x < n; x++) { push(x, 0); push(x, n - 1); }
+    for (let y = 0; y < n; y++) { push(0, y); push(n - 1, y); }
+    while (st.length) {
+      const y = st.pop(), x = st.pop();
+      if (x > 0) push(x - 1, y); if (x < n - 1) push(x + 1, y);
+      if (y > 0) push(x, y - 1); if (y < n - 1) push(x, y + 1);
+    }
+    let filled = 0;
+    for (let i = 0; i < n * n; i++) if (!out[i] && !mask[i]) { mask[i] = 1; filled++; }
+    void filled;
+  }
+
   const dmap = chamfer(mask, n, n);
 
   // ── 深度归一化：**只取主体内部的分位**（③ 条见文件头）─────
@@ -179,7 +204,7 @@ export function buildGeometry(THREE, img, depth, n = N_GRID) {
       const byAlpha = Math.max(0, Math.min(1, (al - 0.04) / 0.5));
       const byDist = Math.sin(Math.min(1, dmap[i] / (n * 0.10)) * Math.PI * 0.5);
       const taper = Math.min(byAlpha, byDist);           // ① 条见文件头
-      h = (t * (1 - EDGE_TAPER) + t * EDGE_TAPER * taper) * DEPTH_AMP * (0.25 + 0.75 * byAlpha);
+      h = (t * (1 - EDGE) + t * EDGE * taper) * DEPTH * (0.25 + 0.75 * byAlpha);
     }
     pos[k + 2] = h;
   }
@@ -238,7 +263,11 @@ export async function mountPet3D(canvas, petUrl, depthUrl, opts = {}) {
         · `full`  转：**连续 360°**，`period` = **转一圈**几秒
         ⚠️ `full` 用 `ph * 360` 而不是 `sin` —— 正弦在两端会慢下来，看着一顿一顿的；
            连续转必须**匀速**。 */
-  const { spin = true, amp = 0.30, mode = 'swing', deg = 60, period = 18 } = opts;
+  // ⭐ 摆幅：读者 2026-10-14「多少度这个除了 120 应该还有 90 60 这样」
+  //   ⚠️ 这里的度数是**整个弧**，所以摆幅 = 一半（120° 的弧 = ±60°）。
+  const SWING_DEG = { swing120: 60, swing90: 45, swing60: 30 };
+  const { spin = true, period = 18, mode = 'swing120' } = opts;
+  const deg = SWING_DEG[mode] ?? 60;
   const [THREE, img, dimg] = await Promise.all([loadThree(), loadImg(petUrl), loadImg(depthUrl)]);
   const dw = opts.depthW || 512, dh = opts.depthH || 512;
   const dc = document.createElement('canvas'); dc.width = dw; dc.height = dh;
@@ -248,7 +277,8 @@ export async function mountPet3D(canvas, petUrl, depthUrl, opts = {}) {
   const gray = new Uint8Array(dw * dh);
   for (let i = 0; i < dw * dh; i++) gray[i] = dd[i * 4];
 
-  const { geo, tris, relief, distinctZ } = buildGeometry(THREE, img, { w: dw, h: dh, data: gray }, opts.n || N_GRID);
+  const { geo, tris, relief, distinctZ } = buildGeometry(THREE, img, { w: dw, h: dh, data: gray },
+    opts.n || N_GRID, { fillHoles: opts.fillHoles !== false, edge: opts.edge, depth: opts.depth });
 
   const tex = new THREE.Texture(img);
   tex.needsUpdate = true;
@@ -280,8 +310,6 @@ export async function mountPet3D(canvas, petUrl, depthUrl, opts = {}) {
   r.toneMapping = THREE.ACESFilmicToneMapping;
   r.toneMappingExposure = 1.0;
   r.outputColorSpace = THREE.SRGBColorSpace;
-  // ⚠️ amp 只改起伏幅度，**不改旋转角** —— 它是"这只东西有多厚"的旋钮
-  void amp;
 
   let on = spin, t0 = 0, raf = 0, frames = 0;
   const draw = (ms) => {

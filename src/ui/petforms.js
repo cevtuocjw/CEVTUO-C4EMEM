@@ -45,3 +45,28 @@ export const PET_FORMS = [
 ];
 
 export const formOf = (id) => PET_FORMS.find((f) => f.id === id) || PET_FORMS[0];
+
+/**
+ * ⭐ 一次性修数据（2026-10-14 我自己造的坑）。
+ *
+ * ⚠️⚠️ 我给「转法」存的是 `c4emem.pet.mode` —— 而 **`mode` 本来就是宠物的工作模式**
+ *    （`'apps'` = 那一圈软件 / `'single'` = 只认一个）。**一个键当两个用**，于是：
+ *      存了 `mode: 'swing'` 之后，悬停那句 `if (petPref().mode === 'apps')` 永不成立
+ *      ⇒ **指针放上去不再自动展开，必须点一下**（读者 2026-10-14 报的正是这个）。
+ *    ⇒ 现在转法存 `spinMode`；这里把已经被写坏的 `mode` 还原成 `'apps'`。
+ *
+ * ⚠️ 修数据要**只认那两个值**（'swing' / 'full'）—— 别把用户真的设成 'single' 也改掉。
+ */
+export function migratePetPrefs() {
+  try {
+    const k = 'c4emem.pet';
+    const p = JSON.parse(localStorage.getItem(k) || '{}');
+    if (p.mode === 'swing' || p.mode === 'full') {
+      if (!p.spinMode) p.spinMode = p.mode;
+      p.mode = 'apps';
+      localStorage.setItem(k, JSON.stringify(p));
+      return true;
+    }
+  } catch { /* 坏 JSON 不管 —— 后面读的地方自己会兜底 */ }
+  return false;
+}
