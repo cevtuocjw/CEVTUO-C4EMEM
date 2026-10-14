@@ -83,7 +83,163 @@ export async function estimateDepth(src, onStage) {
   return { w: d.width, h: d.height, data: d.data };
 }
 
-/* ══ 二、几何 ═══════════════════════════════════════════════════════ */
+/* ══ 二、主体遮罩 ═══════════════════════════════════════════════════
+   ⚠️⚠️ 这里只留**一份**实现，设置页的预览和桌面上那只都调它。
+      （两份必然漂移 —— 本项目在"形态名单""材质"上各栽过一次。）
+
+   ⭐⭐ 三条判据，按可信度排序：
+
+     ① **图自带透明底** ⇒ 用它。这是最准的（用户或上一个工具已经抠好了）。
+     ② **用深度分**（默认），当图是不透明的照片/渲染图：
+        单目深度模型知道"哪个是东西"—— 物体近、背景远。实测在**铬面反射背景**
+        这种图上，它是唯一能用的那一把尺子（见下面 ③ 的对照）。
+     ③ 按背景色泛洪（**只在你明确要求时**才走这一条）：
+        ⚠️ 它假设"背景是一块纯色"。**铬/玻璃/渐变背景**上它会崩 ——
+           铬面反射的就是背景，颜色几乎一样 ⇒ **把物体上亮的面一起吃掉**。
+           读者 2026-10-14 给的那张（铬环雕塑 + 渐变影棚背景）实测：
+           按颜色只留下 **2.9%**（副骨架），按深度留下 **44.1%**（整件东西）。
+*/
+function otsu(hist, total) {
+  let sum = 0;
+  for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sumB = 0, wB = 0, best = -1, thr = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (!wB) continue;
+    const wF = total - wB;
+    if (!wF) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > best) { best = v; thr = t; }
+  }
+  return thr;
+}
+
+/**
+ * 哪块是主体。**唯一的实现。**
+ * @param px    n×n 的 RGBA（原图缩样）
+ * @param dz    n×n 的灰度（深度缩样，每位一个字节）
+ * @returns {mask:Uint8Array, from:'alpha'|'depth'|'color'|'none'}
+ */
+export function subjectMask(px, n, dz, tune = {}) {
+  // ① 自带透明底
+  let clear = 0;
+  for (let i = 0; i < n * n; i++) if (px[i * 4 + 3] < 24) clear++;
+  const hasAlpha = clear > n * n * 0.03;
+  const want = tune.maskFrom || 'auto';
+  if (want === 'none') return { mask: new Uint8Array(n * n).fill(1), from: 'none' };
+  if (hasAlpha && want !== 'depth' && want !== 'color') {
+    const m = new Uint8Array(n * n);
+    for (let i = 0; i < n * n; i++) m[i] = px[i * 4 + 3] > 96 ? 1 : 0;
+    return { mask: m, from: 'alpha' };
+  }
+  if (want === 'color' || !dz) {
+    // ③ 兜底：按四角颜色泛洪（只在明确要求 / 没有深度图时）
+    const med = (k) => { const a = [0, 1, 2, 3].map((j) => {
+      const x = [2, n - 3, 2, n - 3][j], y = [2, 2, n - 3, n - 3][j];
+      return px[(y * n + x) * 4 + k];
+    }).sort((u, v) => u - v); return a[1]; };
+    const bg = [med(0), med(1), med(2)];
+    const dist = new Uint8Array(n * n);
+    for (let i = 0; i < n * n; i++) {
+      dist[i] = Math.min(255, Math.max(Math.abs(px[i * 4] - bg[0]),
+        Math.abs(px[i * 4 + 1] - bg[1]), Math.abs(px[i * 4 + 2] - bg[2])));
+    }
+    const HARD = 42, SOFT = 62, isBg = new Uint8Array(n * n), st = [];
+    for (let x = 0; x < n; x++) st.push(x, 0, x, n - 1);
+    for (let y = 0; y < n; y++) st.push(0, y, n - 1, y);
+    const P = (x, y) => { const k = y * n + x; if (!isBg[k] && dist[k] < SOFT) { isBg[k] = 1; st.push(x, y); } };
+    while (st.length) {
+      const y = st.pop(), x = st.pop(), k = y * n + x;
+      if (dist[k] < HARD) isBg[k] = 1;
+      if (x > 0) P(x - 1, y); if (x < n - 1) P(x + 1, y);
+      if (y > 0) P(x, y - 1); if (y < n - 1) P(x, y + 1);
+    }
+    const m = new Uint8Array(n * n);
+    for (let i = 0; i < n * n; i++) m[i] = isBg[i] ? 0 : 1;
+    return { mask: keepBiggest(fillHoles(m, n), n), from: 'color' };
+  }
+  // ② 用深度：Otsu 找阈值 → 只留最大的那一块 → 补内部洞
+  const hist = new Array(256).fill(0);
+  for (let i = 0; i < n * n; i++) hist[dz[i]]++;
+  const thr = otsu(hist, n * n);
+  const m = new Uint8Array(n * n);
+  for (let i = 0; i < n * n; i++) m[i] = dz[i] > thr ? 1 : 0;
+  /* ⚠️ 深度遮罩的边是**阈值切过去**的，物体外面还有一圈深度斜坡
+     ⇒ 那一圈会变成侧面看过去的毛边。**退 2px**（侵蚀）再收口，实测明显干净。
+     ⚠️ 侵蚀不能多：退过头会把细的地方（茎、环）整条切掉。 */
+  const e = erode(keepBiggest(fillHoles(m, n), n), n, 2);
+  return { mask: e, from: 'depth' };
+}
+
+/** 只留最大的那块连通域（水印 / 碎屑会把包围盒撑到整张图）。 */
+function keepBiggest(m, n) {
+  const seen = new Uint8Array(n * n); let best = null; const st = [];
+  for (let s0 = 0; s0 < n * n; s0++) {
+    if (!m[s0] || seen[s0]) continue;
+    let cnt = 0; st.push(s0); seen[s0] = 1;
+    while (st.length) {
+      const k = st.pop(); cnt++;
+      const x = k % n, y = (k - x) / n;
+      if (x > 0 && m[k - 1] && !seen[k - 1]) { seen[k - 1] = 1; st.push(k - 1); }
+      if (x < n - 1 && m[k + 1] && !seen[k + 1]) { seen[k + 1] = 1; st.push(k + 1); }
+      if (y > 0 && m[k - n] && !seen[k - n]) { seen[k - n] = 1; st.push(k - n); }
+      if (y < n - 1 && m[k + n] && !seen[k + n]) { seen[k + n] = 1; st.push(k + n); }
+    }
+    if (!best || cnt > best) best = cnt;
+  }
+  if (best == null) return m;
+  // 第二遍：把不是最大那块的都清掉
+  const seen2 = new Uint8Array(n * n), out = new Uint8Array(n * n);
+  for (let s0 = 0; s0 < n * n; s0++) {
+    if (!m[s0] || seen2[s0]) continue;
+    const comp = []; st.push(s0); seen2[s0] = 1;
+    while (st.length) {
+      const k = st.pop(); comp.push(k);
+      const x = k % n, y = (k - x) / n;
+      if (x > 0 && m[k - 1] && !seen2[k - 1]) { seen2[k - 1] = 1; st.push(k - 1); }
+      if (x < n - 1 && m[k + 1] && !seen2[k + 1]) { seen2[k + 1] = 1; st.push(k + 1); }
+      if (y > 0 && m[k - n] && !seen2[k - n]) { seen2[k - n] = 1; st.push(k - n); }
+      if (y < n - 1 && m[k + n] && !seen2[k + n]) { seen2[k + n] = 1; st.push(k + n); }
+    }
+    if (comp.length === best) for (const k of comp) out[k] = 1;
+  }
+  return out;
+}
+
+/** 侵蚀 k 圈（4 邻域）。⚠️ k 只能是 1~3 —— 再大细结构就没了。 */
+function erode(m, n, k) {
+  let cur = m;
+  for (let step = 0; step < k; step++) {
+    const out = new Uint8Array(n * n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const i = y * n + x;
+      if (!cur[i]) continue;
+      out[i] = (x > 0 && cur[i - 1] && x < n - 1 && cur[i + 1] && y > 0 && cur[i - n] && y < n - 1 && cur[i + n]) ? 1 : 0;
+    }
+    cur = out;
+  }
+  return cur;
+}
+
+/** 补主体内部的洞（从四条边泛洪，走不到的就是洞）。 */
+function fillHoles(m, n) {
+  const out = new Uint8Array(n * n), st = [];
+  const P = (x, y) => { const k = y * n + x; if (!out[k] && !m[k]) { out[k] = 1; st.push(x, y); } };
+  for (let x = 0; x < n; x++) { P(x, 0); P(x, n - 1); }
+  for (let y = 0; y < n; y++) { P(0, y); P(n - 1, y); }
+  while (st.length) {
+    const y = st.pop(), x = st.pop();
+    if (x > 0) P(x - 1, y); if (x < n - 1) P(x + 1, y);
+    if (y > 0) P(x, y - 1); if (y < n - 1) P(x, y + 1);
+  }
+  const f = new Uint8Array(n * n);
+  for (let i = 0; i < n * n; i++) f[i] = (m[i] || !out[i]) ? 1 : 0;
+  return f;
+}
+
+/* ══ 三、几何 ═══════════════════════════════════════════════════════ */
 
 /** 两遍 chamfer 距离变换（到"图外"的距离）—— 只用来做第二重收口保险 */
 function chamfer(mask, w, h) {
@@ -143,29 +299,17 @@ export function buildGeometry(THREE, img, depth, n = N_GRID, tune = {}) {
   dg.putImageData(dimg, 0, 0);
   const dz = sample(dc, n);
 
-  // ── 遮罩 ────────────────────────────────────────────────
-  const mask = new Uint8Array(n * n);
+  // ── 遮罩：**唯一一处**（见文件上面的 `subjectMask`）──
+  const got = subjectMask(px, n, dz, tune);
+  const mask = got.mask;
+  const maskedFrom = got.from;
   let opaque = 0;
-  for (let i = 0; i < n * n; i++) { if (px[i * 4 + 3] > 96) { mask[i] = 1; opaque++; } }
-  // ⚠️ 万一这张图没抠过底（整张都是不透明的），退回"和四角颜色差得远"——
-  //    否则遮罩=全图 ⇒ 深度会在背景上乱起伏，而且**不报错**。
-  const fallback = opaque > n * n * 0.985;
-  if (fallback) {
-    let r = 0, g2 = 0, b = 0, k = 0;
-    for (const [x, y] of [[0, 0], [n - 1, 0], [0, n - 1], [n - 1, n - 1]]) {
-      const i = (y * n + x) * 4; r += px[i]; g2 += px[i + 1]; b += px[i + 2]; k++;
-    }
-    r /= k; g2 /= k; b /= k;
-    for (let i = 0; i < n * n; i++) {
-      const dd = Math.abs(px[i * 4] - r) + Math.abs(px[i * 4 + 1] - g2) + Math.abs(px[i * 4 + 2] - b);
-      mask[i] = dd > 60 ? 1 : 0;
-    }
-  }
+  for (let i = 0; i < n * n; i++) opaque += mask[i];
 
   // ⭐ 补镂空：从**四条边**泛洪，走不到的地方就是"主体内部的孔" ⇒ 填满。
   //   ⚠️ 这和"抠底"是两件事：抠底去的是**外面**的背景，这一条补的是**里面**的洞
   //      （读者原话「后边的**镂空了**，需要补满」）。
-  if (FILL) {
+  if (FILL && maskedFrom !== 'depth' && maskedFrom !== 'color') {
     const out = new Uint8Array(n * n), st = [];
     const push = (x, y) => { const k = y * n + x; if (!out[k] && !mask[k]) { out[k] = 1; st.push(x, y); } };
     for (let x = 0; x < n; x++) { push(x, 0); push(x, n - 1); }
@@ -226,7 +370,7 @@ export function buildGeometry(THREE, img, depth, n = N_GRID, tune = {}) {
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  return { geo, tris: idx.length / 3, coverage: (opaque / (n * n)),
+  return { geo, tris: idx.length / 3, coverage: (opaque / (n * n)), maskedFrom,
     relief: zMax - zMin, distinctZ: zs.size, depthLo: lo, depthHi: hi };
 }
 
@@ -277,8 +421,8 @@ export async function mountPet3D(canvas, petUrl, depthUrl, opts = {}) {
   const gray = new Uint8Array(dw * dh);
   for (let i = 0; i < dw * dh; i++) gray[i] = dd[i * 4];
 
-  const { geo, tris, relief, distinctZ } = buildGeometry(THREE, img, { w: dw, h: dh, data: gray },
-    opts.n || N_GRID, { fillHoles: opts.fillHoles !== false, edge: opts.edge, depth: opts.depth });
+  const { geo, tris, relief, distinctZ, maskedFrom } = buildGeometry(THREE, img, { w: dw, h: dh, data: gray },
+    opts.n || N_GRID, { fillHoles: opts.fillHoles !== false, edge: opts.edge, depth: opts.depth, maskFrom: opts.maskFrom });
 
   const tex = new THREE.Texture(img);
   tex.needsUpdate = true;
@@ -341,6 +485,7 @@ export async function mountPet3D(canvas, petUrl, depthUrl, opts = {}) {
         —— 那正是本项目栽过的"假绿三连"里的一条。 */
   canvas.__pet3d = {
     tris,
+    maskedFrom,
     // ⭐ 这两条才是"它真的不是一块平板"的判据（面数证明不了）
     relief,
     distinctZ,

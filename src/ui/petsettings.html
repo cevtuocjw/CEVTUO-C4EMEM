@@ -172,6 +172,17 @@
       <div class="row"><label>补镂空</label>
         <input type="checkbox" id="tuneFill" checked>
         <span class="k">把它内部被抠穿的洞**填满**（读者举例的那个）</span></div>
+      <!-- ⭐ 抠底方式（读者 2026-10-14 那张铬环图逼出来的）：
+           chrome / 玻璃 / 渐变背景上，**按背景色**会把物体上亮的面一起吃掉
+           （实测只剩 2.9%，按深度留 44.1%）。 -->
+      <div class="row"><label>怎么分主体</label>
+        <select id="tuneMask" style="min-width:210px">
+          <option value="auto">自动（有透明底用它，否则按深度）</option>
+          <option value="depth">按深度（物体近、背景远）</option>
+          <option value="color">按背景色（只适合纯色底）</option>
+          <option value="none">不抠（整张都留着）</option>
+        </select>
+        <span class="k" id="tuneMaskTxt"></span></div>
     </div>
     <div class="row" id="mkname" style="display:none"><label>它叫什么</label>
       <input id="mknamein" placeholder="比如：银玫瑰"><button class="go" id="mksave">就它了，装上去</button></div>
@@ -404,6 +415,7 @@ const mkTune = () => ({
   depth: Number($('#tuneDepth').value) / 100,
   edge: Number($('#tuneEdge').value) / 100,
   fillHoles: $('#tuneFill').checked,
+  maskFrom: $('#tuneMask').value,
 });
 /** 预览里那只转着的东西（换一张图要先 dispose，否则 WebGL 上下文会越积越多） */
 let mkT3 = null;
@@ -424,6 +436,9 @@ let mkT3 = null;
  *   ③ 抠出来几乎是空的 / 一个像素不剩 ⇒ **原样不抠**，照样能做 3D
  *   ④ 连原图都读不动 ⇒ 这才是真的失败（唯一还会抛的那一种）
  */
+/** 只居中、不抠（第一步用的就是它）。 */
+function keyOutOnlyFit(img, SIZE = 512, PAD = 0.07) { return fitOnly(img, SIZE, PAD, ''); }
+
 /** ③ 那一级：**不抠**，只把整张原图按比例摆进一个正方形里（居中、留白）。 */
 function fitOnly(img, SIZE, PAD, why) {
   const w = img.naturalWidth, h = img.naturalHeight;
@@ -531,7 +546,10 @@ async function showPreview() {
   box.innerHTML = '<figure><div class="fr a"><img src="' + mkSrc.dataUrl + '"></div><figcaption>原图</figcaption></figure>' +
     '<span style="font-size:20px;color:#aaa">→</span>' +
     '<figure><div class="fr b"><img src="' + mkCut.dataUrl + '"></div>' +
-    '<figcaption>' + (mkCut.cut ? '抠好了 · 主体占 ' + (mkCut.cover*100).toFixed(0) + '%' : '没抠底 · 原样') + '</figcaption></figure>' +
+    '<figcaption>' + (mkCut.cut
+      ? '抠好了 · ' + ({ depth: '按深度', color: '按背景色', alpha: '用它自带的透明底', none: '整张' }[mkCut.from] || '') +
+        ' · 主体占 ' + (mkCut.cover*100).toFixed(0) + '%'
+      : '没抠底 · 原样') + '</figcaption></figure>' +
     // ⭐ 第三个格子是**真的在转**的一只（和桌面上那只同一套代码）
     //   ⚠️ 摆一张静态截图不行 —— "转起来长什么样"正是这里唯一要看的
     (mkDepth ? '<span style="font-size:20px;color:#aaa">→</span>' +
@@ -569,18 +587,67 @@ async function takeImageFromUrl(url, hint) {
   await takeImage(f.dataUrl, '链接：' + url);
 }
 
+let mkFit = null, mkFitImg = null;   // 只居中、不抠的那一版（后面所有抠法都在它上面做）
+
+/**
+ * ⭐ 按当前选的"怎么分主体"重算一张抠好的图。**预览和保存都用它**（只算一次，两处共用）。
+ *
+ * ⚠️⚠️ 为什么不能再用"按背景色"当默认：读者 2026-10-14 那张**铬环雕塑 + 渐变影棚背景**，
+ *    铬面反射的就是背景 ⇒ 泛洪把物体上亮的面一起吃了 ⇒ 抠完只剩 **2.9%**（一副骨架）。
+ *    同一张图按**深度**分 ⇒ 留下 **44.1%**（整件东西）。见 pet3d.js 的 `subjectMask`。
+ */
+async function restyleCut() {
+  if (!mkFitImg || !mkDepth) return null;
+  const N = 512;
+  const px = (() => { const c = document.createElement('canvas'); c.width = c.height = N;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(mkFitImg, 0, 0, N, N);
+    return { data: g.getImageData(0, 0, N, N).data, ctx: g, cv: c }; })();
+  const dc = document.createElement('canvas'); dc.width = mkDepth.w; dc.height = mkDepth.h;
+  const dg = dc.getContext('2d', { willReadFrequently: true });
+  const di = dg.createImageData(mkDepth.w, mkDepth.h);
+  for (let i = 0; i < mkDepth.w * mkDepth.h; i++) {
+    di.data[i * 4] = di.data[i * 4 + 1] = di.data[i * 4 + 2] = mkDepth.data[i]; di.data[i * 4 + 3] = 255;
+  }
+  dg.putImageData(di, 0, 0);
+  const gs = document.createElement('canvas'); gs.width = gs.height = N;
+  const gg = gs.getContext('2d', { willReadFrequently: true }); gg.drawImage(dc, 0, 0, N, N);
+  const sd = gg.getImageData(0, 0, N, N).data;
+  const dz = new Uint8Array(N * N);
+  for (let i = 0; i < N * N; i++) dz[i] = sd[i * 4];
+
+  const { mask, from } = PET3D.subjectMask(px.data, N, dz, { maskFrom: $('#tuneMask').value });
+  const img = px.ctx.getImageData(0, 0, N, N);
+  let keep = 0;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y * N + x;
+    // ⚠️ 边缘**软一点**（羽化 1px）：硬切出来的边在 3D 上就是一圈锯齿
+    let a = mask[i] ? 255 : 0;
+    if (mask[i] && (!(x > 0 && mask[i - 1]) || !(x < N - 1 && mask[i + 1])
+                 || !(y > 0 && mask[i - N]) || !(y < N - 1 && mask[i + N]))) a = 190;
+    img.data[i * 4 + 3] = a;
+    if (a > 24) keep++;
+  }
+  px.ctx.putImageData(img, 0, 0);
+  return { dataUrl: px.cv.toDataURL('image/png'), w: N, h: N, cover: keep / (N * N), cut: from !== 'none', from };
+}
+
 async function takeImage(dataUrl, from) {
   $('#mkmsg').textContent = '在抠底…';
   try {
     mkSrc = { dataUrl, from };
-    mkCut = await keyOut(dataUrl);
+    // ⚠️⚠️ **顺序变了**：先"只居中不抠"，等深度出来之后**再按深度分主体**。
+    //    原来第一步就按背景色抠 —— 那是**在还不知道"哪个是东西"的时候**硬猜颜色。
+    mkFitImg = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataUrl; });
+    mkCut = await keyOutOnlyFit(mkFitImg);
     mkDims = [mkCut.w, mkCut.h];
     // ── ① 先出"抠好了"的预览（用户马上有反馈），② 再花几秒算深度 ──
     mkDepth = null;
     await showPreview();
     $('#mkmsg').textContent = (mkCut.cut ? '抠好了。' : '（' + esc(mkCut.why || '') + '—— 先按原样做。）') + '在量它有多深（第一次要十几秒）…';
     try {
-      mkDepth = await PET3D.estimateDepth(mkCut.dataUrl, (m) => { $('#mkmsg').textContent = m; });
+      mkDepth = await PET3D.estimateDepth(dataUrl, (m) => { $('#mkmsg').textContent = m; });
+      const styled = await restyleCut();          // 现在才真的分主体
+      if (styled) mkCut = styled;
       // ⚠️ 深度图也要和抠好的图**一样大**（512²）—— 不一样的话
       //    网格上 UV 对不齐，表现是"纹理和起伏错位"，而且**不报错**。
       await showPreview();
@@ -744,12 +811,17 @@ function retunePreview() {
   clearTimeout(tuneTimer);
   tuneTimer = setTimeout(() => { if (mkDepth) showPreview(); }, 160);
 }
-for (const id of ['#tuneDepth', '#tuneEdge', '#tuneFill']) {
+for (const id of ['#tuneDepth', '#tuneEdge', '#tuneFill', '#tuneMask']) {
   const el = $(id);
-  const upd = () => {
+  const upd = async () => {
     const d = Number($('#tuneDepth').value), e = Number($('#tuneEdge').value);
     $('#tuneDepthTxt').textContent = `起伏 ${(d / 100).toFixed(2)}` + (d <= 18 ? '（很平）' : d >= 50 ? '（很深）' : '');
     $('#tuneEdgeTxt').textContent = `收口 ${(e / 100).toFixed(2)}` + (e <= 40 ? '（毛边多）' : e >= 80 ? '（很干净）' : '');
+    const m = $('#tuneMask').value;
+    $('#tuneMaskTxt').textContent = m === 'color' ? '⚠️ 只适合纯色底；铬面/玻璃/渐变底会被吃掉一大块'
+      : m === 'none' ? '整张都留着（会带上背景）' : '';
+    // ⚠️ 改"怎么分主体"要**先重算抠好的那张预览**（它是按同一把尺子画出来的）
+    if (mkDepth) { const st2 = await restyleCut(); if (st2) mkCut = st2; }
     retunePreview();
   };
   el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', upd);
@@ -777,73 +849,81 @@ $('#mksave').onclick = async () => {
 };
 
 // ── 跟它说 ───────────────────────────────────────────────────
-let propId = null, spec = null;
-const chatBox = $('#chat');
-chatBox.insertAdjacentHTML('beforeend', bubble('it',
-  '说一句你想要的东西。比如「把我 OneDrive 那个文件夹做成一个来源」。\n' +
-  '⚠️ 现在我能**真的做出来**的是两种：**读一个本地文件夹**、**读一个网址**。'));
+/* ⚠️⚠️ 「跟它说」那张卡**已经收起来了**（读者 2026-10-14：「这一块应该没有」）。
+   而这一段脚本每一条都 `$('#chat')` / `$('#send')` —— 元素不在就是 **null**，
+   第一行 `chatBox.insertAdjacentHTML(...)` 直接抛
+   ⇒ **从那行往后的每一段都不执行**（而控制台之外看不出来）。
+   ⚠️ 我**在写这段的注释里就警告过这件事**，然后自己踩了。
+   ⇒ 现在整段包在 `if` 里：没有那个元素就一步都不跑。 */
+if ($('#chat')) {
+  let propId = null, spec = null;
+  const chatBox = $('#chat');
+  chatBox.insertAdjacentHTML('beforeend', bubble('it',
+    '说一句你想要的东西。比如「把我 OneDrive 那个文件夹做成一个来源」。\n' +
+    '⚠️ 现在我能**真的做出来**的是两种：**读一个本地文件夹**、**读一个网址**。'));
 
-function paintSpec() {
-  const slot = $('#specslot');
-  if (!spec) { slot.innerHTML = ''; return; }
-  const li = (t) => '<li>' + esc(t) + '</li>';
-  slot.innerHTML = '<div class="specbox"><div class="m" style="margin:0">它打算这么做</div><ul class="speclist">' +
-    (spec.kind === 'folder'
-      ? li('读这个文件夹：' + (spec.path || '（还不知道路径）')) +
-        li('只收这些类型的文件：' + ((spec.exts && spec.exts.length) ? spec.exts.join(' / ') : 'md / txt / json / csv / 代码文件'))
-      : li('抓这个网址：' + (spec.url || '（还不知道网址）'))) +
-    li('索引成一个新来源「' + esc(spec.name || '新来源') + '」') +
-    '</ul><div class="row" style="margin-top:8px"><button class="go" id="makedo">就这么做</button>' +
-    '<span class="k">按下去它会真去读、真去索引，然后把读到多少条报给你。</span></div></div>';
-  $('#makedo').onclick = async () => {
-    const b = $('#makedo'); b.disabled = true; b.textContent = '在做…';
-    const r = await post('/api/features/make', { id: propId, spec, name: spec.name });
-    b.disabled = false; b.textContent = '就这么做';
-    // ⚠️ 报的是**真数**。没做成要说清为什么、能做的是哪一半。
-    $('#makemsg').innerHTML = r.error
-      ? '<span class="bad">没做成：' + esc(r.error) + '</span>'
-      : '<span class="ok">做出来了：' + (r.docsAdded > 0
-          ? '新读到 ' + r.docsAdded + ' 篇 · 现在共 ' + r.chunksAdded + ' 段'
-          : '已经是最新的，还是 ' + r.chunksAdded + ' 段') + '</span> · 在「搜索」里搜得到';
-  };
-}
-
-$('#send').onclick = async () => {
-  const q = $('#q').value.trim();
-  if (!q) return;
-  $('#q').value = '';
-  chatBox.insertAdjacentHTML('beforeend', bubble('me', q));
-  chatBox.scrollTop = chatBox.scrollHeight;
-  const b = $('#send'); b.disabled = true; b.textContent = '…';
-  // 第一条：先让它给方向；之后就是在这条提案上接着聊
-  const r = propId
-    ? await post('/api/proposals/chat', { id: propId, q })
-    : await post('/api/features/propose', { wish: q });
-  b.disabled = false; b.textContent = '发送';
-  if (r.error) {
-    chatBox.insertAdjacentHTML('beforeend', bubble('it', '做不了：' + r.error + '\n（多半是还没填 API key —— 上面那一格）'));
-    return;
+  function paintSpec() {
+    const slot = $('#specslot');
+    if (!spec) { slot.innerHTML = ''; return; }
+    const li = (t) => '<li>' + esc(t) + '</li>';
+    slot.innerHTML = '<div class="specbox"><div class="m" style="margin:0">它打算这么做</div><ul class="speclist">' +
+      (spec.kind === 'folder'
+        ? li('读这个文件夹：' + (spec.path || '（还不知道路径）')) +
+          li('只收这些类型的文件：' + ((spec.exts && spec.exts.length) ? spec.exts.join(' / ') : 'md / txt / json / csv / 代码文件'))
+        : li('抓这个网址：' + (spec.url || '（还不知道网址）'))) +
+      li('索引成一个新来源「' + esc(spec.name || '新来源') + '」') +
+      '</ul><div class="row" style="margin-top:8px"><button class="go" id="makedo">就这么做</button>' +
+      '<span class="k">按下去它会真去读、真去索引，然后把读到多少条报给你。</span></div></div>';
+    $('#makedo').onclick = async () => {
+      const b = $('#makedo'); b.disabled = true; b.textContent = '在做…';
+      const r = await post('/api/features/make', { id: propId, spec, name: spec.name });
+      b.disabled = false; b.textContent = '就这么做';
+      // ⚠️ 报的是**真数**。没做成要说清为什么、能做的是哪一半。
+      $('#makemsg').innerHTML = r.error
+        ? '<span class="bad">没做成：' + esc(r.error) + '</span>'
+        : '<span class="ok">做出来了：' + (r.docsAdded > 0
+            ? '新读到 ' + r.docsAdded + ' 篇 · 现在共 ' + r.chunksAdded + ' 段'
+            : '已经是最新的，还是 ' + r.chunksAdded + ' 段') + '</span> · 在「搜索」里搜得到';
+    };
   }
-  const items = r.items || [];
-  if (!propId && items.length) {
-    // 把方案正文当第一条回答；spec 可能已经在这条里了
-    propId = items[0].id;
-    spec = items[0].spec || null;
-    chatBox.insertAdjacentHTML('beforeend', bubble('it', items[0].plan || '（它没写出方案）'));
-    if (items.length > 1) {
-      chatBox.insertAdjacentHTML('beforeend', bubble('it',
-        '（它还猜了另外 ' + (items.length - 1) + ' 个方向，在 c4emem 的「自我改进」里能看到。）'));
+
+  $('#send').onclick = async () => {
+    const q = $('#q').value.trim();
+    if (!q) return;
+    $('#q').value = '';
+    chatBox.insertAdjacentHTML('beforeend', bubble('me', q));
+    chatBox.scrollTop = chatBox.scrollHeight;
+    const b = $('#send'); b.disabled = true; b.textContent = '…';
+    // 第一条：先让它给方向；之后就是在这条提案上接着聊
+    const r = propId
+      ? await post('/api/proposals/chat', { id: propId, q })
+      : await post('/api/features/propose', { wish: q });
+    b.disabled = false; b.textContent = '发送';
+    if (r.error) {
+      chatBox.insertAdjacentHTML('beforeend', bubble('it', '做不了：' + r.error + '\n（多半是还没填 API key —— 上面那一格）'));
+      return;
     }
-  } else {
-    const msgs = (r.item && r.item.msgs) || [];
-    const ans = msgs.length ? msgs[msgs.length - 1].a : '（没答上）';
-    chatBox.insertAdjacentHTML('beforeend', bubble('it', ans));
-    if (r.spec) spec = r.spec;
-  }
-  chatBox.scrollTop = chatBox.scrollHeight;
-  paintSpec();
-};
-$('#q').onkeydown = (e) => { if (e.key === 'Enter') $('#send').click(); };
+    const items = r.items || [];
+    if (!propId && items.length) {
+      // 把方案正文当第一条回答；spec 可能已经在这条里了
+      propId = items[0].id;
+      spec = items[0].spec || null;
+      chatBox.insertAdjacentHTML('beforeend', bubble('it', items[0].plan || '（它没写出方案）'));
+      if (items.length > 1) {
+        chatBox.insertAdjacentHTML('beforeend', bubble('it',
+          '（它还猜了另外 ' + (items.length - 1) + ' 个方向，在 c4emem 的「自我改进」里能看到。）'));
+      }
+    } else {
+      const msgs = (r.item && r.item.msgs) || [];
+      const ans = msgs.length ? msgs[msgs.length - 1].a : '（没答上）';
+      chatBox.insertAdjacentHTML('beforeend', bubble('it', ans));
+      if (r.spec) spec = r.spec;
+    }
+    chatBox.scrollTop = chatBox.scrollHeight;
+    paintSpec();
+  };
+  $('#q').onkeydown = (e) => { if (e.key === 'Enter') $('#send').click(); };
+}
 </script>
 </body>
 </html>
