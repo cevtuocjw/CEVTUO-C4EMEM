@@ -1649,6 +1649,15 @@ body.narrow .tbar,body.narrow .flowbar{padding-left:68px;padding-right:68px;flex
   0%,100%{transform:rotateX(3deg) rotateY(-24deg)}
   50%    {transform:rotateX(3deg) rotateY(24deg)}}
 
+/* ⭐⭐ 真 3D（2026-10-14，读者：「把 2D 的转化为 3D 的，不是仅仅加厚」）。
+   ⚠️ `preserve-3d` / `perspective` 这些都**用不上** —— 3D 是 WebGL 在画布内部做的，
+      和 CSS 变换无关。这里只负责"让画布占满那个格子、且背景是透的"。
+   ⚠️⚠️ 画布必须**显式**给宽高（104×104，和 .petbody 一样）：
+      给 `width:100%` 而后端 canvas 的 CSS 尺寸解析成 0 的话，three 会把视口设成 0×0
+      —— **画面一片空白，而控制台一个字都没有。** */
+.petbody.p3d{width:104px;height:104px;border-radius:0;background:none;padding:0;border:0}
+.petbody.p3d #pet3dc{width:104px;height:104px;display:block}
+
 /* ⭐ 一键「不转」（读者 2026-10-13：「所有的都可以选择是否旋转…默认旋转」）。
    ⚠️ 用 `animation:none` 而不是 `paused` —— `paused` 会**冻在当场的那个角度**
       （可能正好是个看不出来是什么的侧角），而 `none` 让它回到正面那一帧。

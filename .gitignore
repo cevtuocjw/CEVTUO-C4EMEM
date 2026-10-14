@@ -18,3 +18,6 @@ app/.build.swift
 pet-bridge.log
 __pycache__/
 *.pyc
+
+# ── 2D→3D 的三方件（35MB，由 scripts/fetch-pet3d.sh 拉）──────
+src/ui/vendor/

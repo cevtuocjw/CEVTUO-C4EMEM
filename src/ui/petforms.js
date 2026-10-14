@@ -6,18 +6,36 @@
  *    **「设置里能选，选了之后 Pet 变空白」**（那个形态的 id 在另一份名单里没有，
  *    渲染那一支就落到 `else` 上），而且**一个错都不报**。
  *
- * ⚠️ `kind` 决定怎么画，三种：
+ * ⚠️ `kind` 决定怎么画，四种：
  *    · `card`   —— 多层卡（`card.png` 叠出来的，见 pet.js 的 buildCard）
  *    · `orb`    —— 有大动图（`/ui/assets/mineral-<id>-mini.webp`，已经抠好白底）
- *    · `static` —— 一张静态图（**转不了**，如实说：它是张图，不是模型）
- *      ⚠️ 用户自己造的也走这一支（id 是 `u-<名字>`，图在 `/pets/` 下）。
+ *    · `slab`   —— 一张静态图，**叠 16 层**假装有厚度（转起来还是有"纸"感）
+ *    · `3d`     —— ⭐ **真 3D**：那张图 + 一张深度图（Depth Anything V2 算的），
+ *                  在 three.js 里做成位移网格。见 `src/ui/pet3d.js`（唯一一份）。
+ *                  读者 2026-10-14：「把 2D 的转化为 3D 的，**不是仅仅加厚**」。
+ *      ⚠️ 用户自己造的走 `3d`（有深度图时）或 `slab`（没有时）。
+ *         **两种都要能选** —— 没有深度图不是错误，是"这一只还没做成 3D"。
  */
 export const PET_FORMS = [
   { id: 'card',   nm: 'CEVTUO 卡片', kind: 'card' },
   { id: 'pearl',  nm: '珍珠',        kind: 'orb', video: '/ui/assets/pearl-orb.mp4' },
-  { id: 'silver', nm: '银',          kind: 'orb', video: '/ui/assets/mineral-silver-loop.mp4', keyed: 1 },
-  { id: 'lead',   nm: '铅',          kind: 'orb', video: '/ui/assets/mineral-lead-loop.mp4',   keyed: 1 },
-  { id: 'zinc',   nm: '锌',          kind: 'orb', video: '/ui/assets/mineral-zinc-loop.mp4',   keyed: 1 },
+  /* ⭐⭐ 这三种**在桌面上本来是静态图**（`*-mini.webp`）—— 于是**没有任何东西可转**
+     ⇒ 读者把「不转」开关打开又关掉，画面**一模一样**，那个开关看起来就是坏的。
+     （2026-10-14 实测：他的 pref 正是 `{"form":"silver","spin":false}`。）
+     ⇒ 现在它们带一张**预先算好的深度图**（`scripts/make-pet-depths.mjs` 生成，
+        每张 20 来 KB，进 git），走和用户自造那几只**同一条 3D 流水线**。
+     ⚠️ 为什么预置而不是现算：现算要 4 秒 + 19MB 模型 ⇒ 每开一次 Pet 都卡一下。
+     ⚠️⚠️ **这三张 `*-mini.webp` 是动图 WebP**（1~2.5MB，无限循环，`ANIM` 头实测）。
+        ⇒ 它们**根本停不下来**：CSS `animation:none` 对动图无效（和 `<video>` 同一个坑，
+          只是更隐蔽 —— 看上去就是一张"图"）。
+        这正是读者 2026-10-14 那句「转不转还是没处理好」的真身。
+        ⇒ 走 3D 这条路的另一个好处是顺带修掉它：three 的贴图只上传**一帧**。 */
+  { id: 'silver', nm: '银',          kind: 'orb', video: '/ui/assets/mineral-silver-loop.mp4', keyed: 1,
+    img: '/ui/assets/mineral-silver-mini.webp', depth: '/ui/assets/mineral-silver.depth.png' },
+  { id: 'lead',   nm: '铅',          kind: 'orb', video: '/ui/assets/mineral-lead-loop.mp4',   keyed: 1,
+    img: '/ui/assets/mineral-lead-mini.webp',   depth: '/ui/assets/mineral-lead.depth.png' },
+  { id: 'zinc',   nm: '锌',          kind: 'orb', video: '/ui/assets/mineral-zinc-loop.mp4',   keyed: 1,
+    img: '/ui/assets/mineral-zinc-mini.webp',   depth: '/ui/assets/mineral-zinc.depth.png' },
   // ⚠️ 这里**故意没有**"银玫瑰"。
   //    读者 2026-10-13 给的那张图是「**我们一起要造的另一只**的外观」——
   //    内置一只同名的会变成列表里**两个都叫银玫瑰**（一个我给的、一个你造的），

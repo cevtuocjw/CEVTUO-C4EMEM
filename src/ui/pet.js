@@ -62,6 +62,29 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 // ⚠️ 名单**搬到 `petforms.js`** 了 —— 设置页也要它，两份必然漂移，
 //    而漂移的症状是「设置里选了、Pet 变空白」且**一个错都不报**。
 import { PET_FORMS, formOf } from './petforms.js';
+// ⭐ 2D→**真 3D** 的那条路 —— 和设置页**共用同一份**（`src/ui/pet3d.js`）。
+//    ⚠️ 模块本身很轻（真正的重件是里面的**动态** import：three 1.2MB、深度模型 19MB）。
+import * as PET3D from './pet3d.js';
+
+/* ── 用户自己造的那些：id → 它在服务端的样子（图 + 深度图）───────────
+   ⚠️ 以前这里靠 `u-<名字>.png` **拼**出来。加了深度图之后拼不出来了：
+      "有没有深度图"是**服务端才知道**的事，猜出来的后果是
+      **有 3D 的也退回叠层**，而且一个错都不报。
+   ⚠️ 这一页每次换形态都会整页 reload（见 Swift 的 reloadPet）⇒ 启动拉一次就够。 */
+let MADE = {};
+async function loadMade() {
+  try {
+    const r = await (await fetch('/api/pet/forms')).json();
+    const m = {};
+    for (const x of (r.items || [])) m[x.id] = x;
+    MADE = m;
+  } catch { MADE = {}; }        // 读不到 ⇒ 退回叠层（**不是**空白，也不是报错）
+  renderPet();
+}
+/** 防"上一只的 3D 挂晚了、盖掉刚换的那只" —— 换形态时 +1，落地时对不上就作废 */
+let renderSeq = 0;
+/** 当前挂着的那一只 3D（换形态/换图时要 dispose，否则 WebGL 上下文会越积越多） */
+let T3 = null;
 /** ⚠️ 和主界面那份**必须一样**（两份名单漂移的症状是"Pet 换到某个形态就空白"） */
 const CARD_LAYERS = 18;
 
@@ -79,60 +102,87 @@ function buildCard(el) {
 }
 
 /**
- * ⭐ 给一张 **2D 图**做"厚度"：同一张图叠 N 层、往 Z 错开。
- *
- * 读者 2026-10-13：「我希望如果是 2D 的你能够**给它一点厚度让它旋转**」
- * ⚠️ 不叠层的话，转起来就是**一张纸侧过去**（转到 90° 直接消失），
- *    看起来像"坏了"，而不是"它在转身"。
- * ⚠️ 层数不能太多：每层都是一次合成，48 个面那种教训就在 FACT 里
- *    （折射玻璃 48 面 ⇒ 从 60fps 掉到 4.7fps）。16 层在这个尺寸下没压力。
+ * ⭐ 「给 2D 图做厚度」的那份实现**搬到 `petslab.js`** 了 —— 主界面那只 Pet
+ * （`app.js`）也要它，两份必然漂移（这个项目在名单上已经栽过一次）。
+ * 现在它是 `3d` 那条路的**降级兜底**：有深度图就是真 3D，没有才走这里。
  */
-const SLAB_LAYERS = 16;
-function buildSlab(el, src) {
-  if (!el) return;
-  let html = '';
-  for (let i = 0; i < SLAB_LAYERS; i += 1) {
-    const z = -2.6 + (5.2 * i) / (SLAB_LAYERS - 1);
-    // ⚠️ 压暗系数**别给大** —— 16 层叠起来，边上那几层一暗，整体就发灰，
-    //    看起来像换了个材质而不是原来的图有了厚度。实测 0.45 就偏灰了。
-    const k = (1 - Math.abs(z / 2.6) * 0.24).toFixed(3);
-    html += `<i class="sl" style="transform:translateZ(${z.toFixed(2)}px);filter:brightness(${k});`
-      + `background-image:url('${src}')"></i>`;
-  }
-  el.innerHTML = html;
-}
+import { buildSlab, SLAB_LAYERS } from './petslab.js';
+void SLAB_LAYERS;
 
 function renderPet() {
   const p = petPref();
-  // ⚠️ 自己做出来的那些 id 是 `u-<名字>`（图在 `/pets/` 下），**不在**内置名单里
+  const spin = p.spin !== false;      // 默认转：只有**明确写了 false** 才停
+  // ⚠️ 自己做出来的那些 id 是 `u-<名字>`，**不在**内置名单里
   //    —— 不走这一支的话，`formOf` 会兜底回卡片 ⇒
   //    用户换到自己造的那只，看到的还是卡片，而**一个错都不报**。
   const mine = String(p.form || '').startsWith('u-') ? String(p.form).slice(2) : '';
+  const made = mine ? MADE[mine] : null;
   const f = mine
-    ? { id: p.form, nm: mine, kind: 'static', img: '/pets/' + encodeURIComponent(mine) + '.png' }
+    ? {
+      id: p.form, nm: mine,
+      // ⭐ 有深度图 = **真 3D**；没有 = 叠层。两种都是"能用"，不是错误。
+      kind: made && made.depth ? '3d' : 'slab',
+      img: (made && made.img) || `/pets/${encodeURIComponent(mine)}.png`,
+      depth: made && made.depth,
+    }
     : formOf(p.form);
   const form = f.id;
+  // ⭐ **有深度图的一律走真 3D**（内置那三种矿物也是）——
+  //   ⚠️ 不这么收口的话，"内置那几个"和"自己造的"就是两条渲染路，
+  //      而两条路必然漂移（本项目在名单上已经栽过）。
+  const kind = (f.depth && f.img) ? '3d' : f.kind;
   const body = $('#petbody');
-  body.className = 'petbody' + (f.kind === 'card' ? ' ptcard' : f.kind === 'static' ? ' pslab' : f.keyed ? ' mono' : '');
-  body.innerHTML = f.kind === 'card' ? '<div class="ck" id="petck"></div>'
-    // ⚠️ 静态图那一支**必须在** —— 落不到的时候（名单里没有那个 id）会渲染成空，
-    //    而"空"和"这个形态坏了"长得一模一样。
-    : f.kind === 'static' ? '<div class="slab" id="petslab"></div>'
-      : f.keyed ? `<img src="/ui/assets/mineral-${form}-mini.webp" alt="" draggable="false">`
-        : `<video src="${f.video}" muted loop autoplay playsinline></video>`;
-  if (f.kind === 'card') buildCard($('#petck'));
-  if (f.kind === 'static') buildSlab($('#petslab'), f.img);
+  body.className = 'petbody' + (kind === 'card' ? ' ptcard'
+    : kind === 'slab' ? ' pslab' : kind === '3d' ? ' p3d'
+      : f.keyed ? ' mono' : '');
+  body.innerHTML = kind === 'card' ? '<div class="ck" id="petck"></div>'
+    // ⚠️ 三种"落不到"的分支**都必须在** —— 落不到的时候（名单里没有那个 id）
+    //    会渲染成空，而"空"和"这个形态坏了"长得一模一样。
+    : kind === 'slab' ? '<div class="slab" id="petslab"></div>'
+      : kind === '3d' ? '<canvas id="pet3dc" width="104" height="104"></canvas>'
+        : f.keyed ? `<img src="/ui/assets/mineral-${form}-mini.webp" alt="" draggable="false">`
+          : `<video src="${f.video}" muted loop autoplay playsinline></video>`;
+  if (kind === 'card') buildCard($('#petck'));
+  if (kind === 'slab') buildSlab($('#petslab'), f.img);
+  if (kind === '3d') mount3d({ ...f, img: f.img || `/pets/${encodeURIComponent(mine)}.png` }, spin);
 
   // ⭐ 旋转开关（读者 2026-10-13：「所有的都可以选择是否旋转这个选项，
   //   一键旋转不旋转，**不然默认旋转**」）。
-  //   ⇒ 默认就是转：只有**明确写了 false** 才停。
-  //   ⚠️ 视频不吃 CSS 动画，要单独 pause —— 只加个类的话，
-  //     勾了"不转"而那个形态还在播，用户会以为开关没生效。
-  const spin = p.spin !== false;
+  //   ⚠️ 三种形态各有各的停法，**这里的类只治前两种**：
+  //      · 视频  —— 不吃 CSS 动画，得单独 `pause()`
+  //      · 卡片/叠层 —— 靠 `.petbody.pstill *{animation:none !important}`
+  //      · **3D（WebGL）—— CSS 完全管不着**，必须由 three 那边停 rAF
+  //        （`setSpin(false)`，见 pet3d.js 的 mountPet3D）。
+  //        漏掉这一支的症状：勾了"不转"，**它照样转**，而且没有任何报错。
   body.classList.toggle('pstill', !spin);
   if (!spin) body.querySelectorAll('video').forEach((v) => { try { v.pause(); } catch { /* 暂停失败也不是错误 */ } });
   $('#pet').dataset.form = form;
   document.body.classList.toggle('pet-letters-off', p.letters === false);
+}
+
+/**
+ * 把「自己造的那只 + 它的深度图」挂成一只**能转的真 3D**。
+ * ⚠️ 必须防两件事：
+ *   ① 异步挂载比下一次 renderPet 慢 ⇒ 旧的那只会盖住新的（用 renderSeq 作废）
+ *   ② 换形态时旧的不 dispose ⇒ WebGL 上下文越积越多（浏览器上限 16 个左右，
+ *      超了会**静默丢掉最老的那个**，表现是"Pet 突然白了"）
+ */
+async function mount3d(f, spin) {
+  const token = ++renderSeq;
+  if (T3) { try { T3.dispose(); } catch { /* 释放失败也不能挡住下一只 */ } T3 = null; }
+  const c = $('#pet3dc');
+  if (!c) return;
+  try {
+    const m = await PET3D.mountPet3D(c, f.img, f.depth, { spin });
+    if (token !== renderSeq) { m.dispose(); return; }   // 期间又换了一次 ⇒ 这只作废
+    T3 = m;
+    report(`3d 挂上了 ${f.nm} tris=${m.tris} spin=${spin}`);
+  } catch (e) {
+    // ⚠️ 挂了要**说出来**（这一页没有控制台，只能回报到服务端）
+    report('3d 挂了：' + (e && e.message));
+    if (token === renderSeq) $('#petbody').innerHTML = '<div class="slab" id="petslab"></div>';
+    if (token === renderSeq) buildSlab($('#petslab'), f.img);   // 退回叠层，别留一块白
+  }
 }
 
 /* ══ 轮盘 ═══════════════════════════════════════════════════════════
@@ -835,5 +885,8 @@ addEventListener('keydown', onKey);
 // 主界面改了设置（形态 / 字母 / 大小）要跟上 —— 用 storage 事件同步
 addEventListener('storage', (e) => { if (e.key === PET_KEY) { renderPet(); if (W.open) paintWheel(); } });
 
-renderPet();
+// ⚠️ 画的是**自己造的那只**时要先去问服务端"它有没有深度图"（决定 3D 还是叠层）
+//    —— 先画一遍叠层再换成 3D 会**闪一下**（读者对"闪"很敏感，栽过两次）。
+if (String(petPref().form || '').startsWith('u-')) loadMade();
+else renderPet();
 report('轮盘就绪 Launchy 模型：ARC ' + ARC0 + '~' + ARC1 + ' per=' + PER_RING);

@@ -17,7 +17,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-export interface MadePet { id: string; nm: string; file: string; w: number; h: number; cover: number; ts: string; from: string }
+export interface MadePet {
+  id: string; nm: string; file: string; w: number; h: number; cover: number; ts: string; from: string;
+  /**
+   * ⭐ 2D → **真 3D**：这只 Pet 的**深度图**（512² 灰度 PNG，和 `<id>.png` 并排）。
+   * 存的是 `petmaker` 之外算好的结果 —— 算它的模型有 19MB、要跑 4 秒，
+   * **只在"造"的时候算一次**；渲染那只 Pet 的窗口只读这张图。
+   * ⚠️ 缺它 ⇒ 退回"叠层"那种假厚度，而**不会报错**。
+   */
+  depth?: string;
+  depthW?: number; depthH?: number;
+}
 
 const dirOf = (dataDir: string) => join(dataDir, 'pets');
 const regOf = (dataDir: string) => join(dataDir, 'pets.json');
@@ -51,7 +61,7 @@ const slug = (s: string) => {
  * 把浏览器抠好的一张图存成一个形态。
  * ⚠️ `cover`（主体占画布的比例）**要一起存** —— 它是"抠过头了没有"的唯一现成判据。
  */
-export function savePet(dataDir: string, body: { name?: string; dataUrl?: string; cover?: number; w?: number; h?: number; from?: string }) {
+export function savePet(dataDir: string, body: { name?: string; dataUrl?: string; cover?: number; w?: number; h?: number; from?: string; depth?: string; depthW?: number; depthH?: number }) {
   const name = String(body.name || '').trim().slice(0, 24);
   if (!name) return { ok: false as const, error: '先给它起个名字' };
   const m = String(body.dataUrl || '').match(/^data:image\/png;base64,(.+)$/);
@@ -71,14 +81,54 @@ export function savePet(dataDir: string, body: { name?: string; dataUrl?: string
 
   const file = join(dir, `${id}.png`);
   writeFileSync(file, buf);
+
+  // ⭐ 深度图（可选）：有它就是**真 3D**，没有就退回叠层。
+  //   ⚠️ 挂了**如实记下来**，不要静静地当做没有 —— 那会让"这只没做成 3D"
+  //      和"3D 这条路坏了"长得一模一样。
+  let depth: string | undefined;
+  const dm = String(body.depth || '').match(/^data:image\/png;base64,(.+)$/);
+  if (dm) {
+    const dbuf = Buffer.from(dm[1], 'base64');
+    // 深度图是 512² 的灰度，正常几十~几百 KB。太小 = 画空了；太大 = 传错了东西。
+    if (dbuf.length >= 2000 && dbuf.length <= 8 * 1024 * 1024) {
+      depth = join(dir, `${id}.depth.png`);
+      writeFileSync(depth, dbuf);
+    }
+  }
+
   const item: MadePet = {
     id, nm: name, file, w: Number(body.w || 0), h: Number(body.h || 0),
     cover: Number(body.cover || 0), ts: new Date().toISOString(), from: String(body.from || ''),
+    ...(depth ? { depth, depthW: Number(body.depthW || 512), depthH: Number(body.depthH || 512) } : {}),
   };
   reg.items.unshift(item);
   reg.removed = reg.removed.filter((x) => x !== id);
   saveReg(dataDir, reg);
   return { ok: true as const, item };
+}
+
+/**
+ * ⭐ 给**已经做好的那一只**补上深度图（"把它变成真 3D"）。
+ *
+ * ⚠️ 为什么必须有这个口：老的 Pet 是在这条流水线存在**之前**做的 ⇒ 它们没有深度图
+ *    ⇒ 换上去还是**叠层**。而使用者看到的是"我按了 3D，它一点都没变" ——
+ *    和"这个功能根本没做"长得一模一样。补这个口比让人重新做一只便宜得多。
+ */
+export function attachDepth(dataDir: string, id: string, body: { depth?: string; depthW?: number; depthH?: number }) {
+  const reg = loadPets(dataDir);
+  const it = reg.items.find((x) => x.id === id);
+  if (!it) return { ok: false as const, error: '没有这一只' };
+  const dm = String(body.depth || '').match(/^data:image\/png;base64,(.+)$/);
+  if (!dm) return { ok: false as const, error: '深度图不对 —— 只收 PNG 的 data URL' };
+  const dbuf = Buffer.from(dm[1], 'base64');
+  if (dbuf.length < 2000) return { ok: false as const, error: `深度图只有 ${dbuf.length} 字节 —— 多半是空白的` };
+  const f = join(dirOf(dataDir), `${id}.depth.png`);
+  writeFileSync(f, dbuf);
+  it.depth = f;
+  it.depthW = Number(body.depthW || 512);
+  it.depthH = Number(body.depthH || 512);
+  saveReg(dataDir, reg);
+  return { ok: true as const, id, bytes: dbuf.length };
 }
 
 export function removePet(dataDir: string, id: string) {
@@ -89,6 +139,8 @@ export function removePet(dataDir: string, id: string) {
   if (!reg.removed.includes(id)) reg.removed.push(id);
   saveReg(dataDir, reg);
   try { rmSync(it.file, { force: true }); } catch { /* 文件删不掉也别把登记回滚 */ }
+  // ⚠️ 深度图要一起删 —— 留着就是一堆没人认领的孤儿 PNG（而且**没人会发现**）
+  if (it.depth) { try { rmSync(it.depth, { force: true }); } catch { /* 同上 */ } }
   return { ok: true as const };
 }
 

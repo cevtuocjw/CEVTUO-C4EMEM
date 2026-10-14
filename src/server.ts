@@ -80,7 +80,7 @@ import { discoverProjects, loadProjects, addProject, removeProject } from './pro
 import { cachedApps } from './apps';
 import { loadProposals, addProposal, patchProposal, appendMsg, removeProposal } from './proposals';
 import { applySource, parseSpec, type SourceSpec } from './sourcekit';
-import { loadPets, savePet, removePet, probeUrl, fetchImage } from './petmaker';
+import { loadPets, attachDepth, savePet, removePet, probeUrl, fetchImage } from './petmaker';
 import { refreshPanel, listPanel, setPanelState } from './panel';
 
 const cfg = loadConfig();
@@ -1281,6 +1281,13 @@ const server = Bun.serve({
         addActivity(db, { kind: 'feature', icon: '🌹', title: `做了一只新 Pet：${r.item.nm}`, detail: `主体占 ${(r.item.cover * 100).toFixed(0)}%` });
         return json(r);
       }
+      if (p === '/api/pet/depth' && req.method === 'POST') {
+        // ⭐ 给已经做好的一只**补上深度图**（老的那些是在 3D 这条路存在之前做的）
+        const b = (await req.json().catch(() => ({}))) as { id?: string; depth?: string; depthW?: number; depthH?: number };
+        const r = attachDepth(cfg.dataDir, String(b.id || ''), b);
+        if (!r.ok) return json({ error: r.error }, 400);
+        return json(r);
+      }
       if (p === '/api/pet/remove' && req.method === 'POST') {
         const b = (await req.json().catch(() => ({}))) as { id?: string };
         const r = removePet(cfg.dataDir, String(b.id || ''));
@@ -1289,7 +1296,15 @@ const server = Bun.serve({
       }
       if (p === '/api/pet/forms') {
         const reg = loadPets(cfg.dataDir);
-        return json({ items: reg.items.filter((x) => !reg.removed.includes(x.id)) });
+        // ⚠️ 对外**只给 URL，不给磁盘路径**（`file` 是绝对路径，页面用不上它）。
+        //    `depth` 有值 = 这只是**真 3D**；没有 = 退回叠层。
+        //    两种都要**如实带出去** —— 页面上"这只没有 3D"和"3D 坏了"必须分得开。
+        const items = reg.items.filter((x) => !reg.removed.includes(x.id)).map((x) => ({
+          id: x.id, nm: x.nm, w: x.w, h: x.h, cover: x.cover, ts: x.ts, from: x.from,
+          img: `/pets/${x.id}.png`,
+          ...(x.depth ? { depth: `/pets/${x.id}.depth.png`, depthW: x.depthW || 512, depthH: x.depthH || 512 } : {}),
+        }));
+        return json({ items });
       }
 
       if (p === '/api/features/make' && req.method === 'POST') {

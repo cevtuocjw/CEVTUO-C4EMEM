@@ -372,25 +372,45 @@ export function addActivity(
     sessionId?: string;
   },
 ): number {
-  db.query(
-    `INSERT INTO activity (kind, icon, title, detail, ts, ms, tok_in, tok_out, tok_sum, meta, session_id)
-     VALUES ($kind,$icon,$title,$detail,$ts,$ms,$tin,$tout,$tsum,$meta,$sid)`,
-  ).run({
-    $kind: a.kind,
-    $icon: a.icon,
-    $title: a.title,
-    $detail: a.detail ?? null,
-    $ts: new Date().toISOString(),
-    $ms: a.ms ?? null,
-    $tin: a.tokIn ?? null,
-    $tout: a.tokOut ?? null,
-    $tsum: (a.tokIn ?? 0) + (a.tokOut ?? 0) || null,
-    $meta: a.meta ? JSON.stringify(a.meta) : null,
-    $sid: a.sessionId ?? null,
-  });
-  const r = db.query<{ id: number }, []>('SELECT last_insert_rowid() id').get();
-  return r?.id ?? 0;
+  /*
+   * ⚠️⚠️ **这里绝不能抛。**
+   * 真实事故（2026-10-14 验收时撞上）：`/api/pet/save` 里 `savePet` **已经成功**、
+   * 文件也写下去了，紧跟着这一行 `INSERT` 因为底层库 I/O 出错抛了 ⇒ 整个路由回 500。
+   * 调用方看到的是"失败了"，而**东西其实已经存好了** ——
+   * 和"收到成功回执、数据没动"是同一枚硬币的两面。
+   *
+   * ⭐ 活动流水是**附加信息**，不是关键路径 ⇒ 它挂掉只该少一条记录。
+   * （这个项目的规矩：依赖挂掉要降级，不能 500。）
+   */
+  try {
+    db.query(
+      `INSERT INTO activity (kind, icon, title, detail, ts, ms, tok_in, tok_out, tok_sum, meta, session_id)
+       VALUES ($kind,$icon,$title,$detail,$ts,$ms,$tin,$tout,$tsum,$meta,$sid)`,
+    ).run({
+      $kind: a.kind,
+      $icon: a.icon,
+      $title: a.title,
+      $detail: a.detail ?? null,
+      $ts: new Date().toISOString(),
+      $ms: a.ms ?? null,
+      $tin: a.tokIn ?? null,
+      $tout: a.tokOut ?? null,
+      $tsum: (a.tokIn ?? 0) + (a.tokOut ?? 0) || null,
+      $meta: a.meta ? JSON.stringify(a.meta) : null,
+      $sid: a.sessionId ?? null,
+    });
+    const r = db.query<{ id: number }, []>('SELECT last_insert_rowid() id').get();
+    return r?.id ?? 0;
+  } catch (e) {
+    // ⚠️ 但要**留痕**（只喊一次）—— 静默吃掉的话，"流水里少了东西"永远查不出来
+    if (!_addActivityWarned) {
+      _addActivityWarned = true;
+      console.warn(`[activity] 写不进去（只喊这一次）：${String(e).slice(0, 160)}`);
+    }
+    return 0;
+  }
 }
+let _addActivityWarned = false;
 
 /** 加一列（幂等）。SQLite 没有 ADD COLUMN IF NOT EXISTS，只能先问 PRAGMA。 */
 function ensureColumn(db: Database, table: string, col: string, decl: string) {

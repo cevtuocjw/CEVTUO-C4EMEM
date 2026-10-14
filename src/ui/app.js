@@ -2389,13 +2389,14 @@ function openLib(anchorEl) {
  *   ⇒ 判据是「**每一个 id 都能在 ORB_VIDEO 里查到文件**」，见 verify-pet.mjs。
  *   `珍珠玻璃` 也一并按读者的话改成 `珍珠`。
  */
-const PET_FORMS = [
-  { id: 'card', nm: 'CEVTUO 卡片' },
-  { id: 'pearl', nm: '珍珠' },
-  { id: 'silver', nm: '银' },
-  { id: 'lead', nm: '铅' },
-  { id: 'zinc', nm: '锌' },
-];
+/* ⚠️⚠️ 名单**搬到 `petforms.js`** 了 —— 设置页 / 桌面上那只 Pet / 这里（主界面）**三处都要它**。
+   各写一份的症状是"漂移"，而漂移在这里的表现是
+   **「设置里能选的新形态，主界面这只换过去是一片空白」**，且**一个错都不报**。
+   （2026-10-14 实测：这份名单当时还停在 5 个内置形态，
+   用户自己造的那些和 spin 开关它**一概不知道** —— 见下面 renderPet 的注释。） */
+import { PET_FORMS, formOf } from '/ui/petforms.js';
+import * as PET3D from '/ui/pet3d.js';
+import { buildSlab } from '/ui/petslab.js';
 const BG_KEY = 'c4emem.bg';
 const bgPref = () => { try { return JSON.parse(localStorage.getItem(BG_KEY) || '{}'); } catch { return {}; } };
 /**
@@ -2417,13 +2418,51 @@ const PET_KEY = 'c4emem.pet';
 const petPref = () => { try { return JSON.parse(localStorage.getItem(PET_KEY) || '{}'); } catch { return {}; } };
 const petSave = (p) => localStorage.setItem(PET_KEY, JSON.stringify({ ...petPref(), ...p }));
 
+/* 用户自己造的那些：id → 服务端那份（图 + 深度图）。
+   ⚠️ 主界面这一只以前**根本不认识它们**（名单里只有 5 个内置形态），
+      换过去就落进 `else` 渲染成 video、`src=undefined` ⇒ **一片空白**。 */
+let MADE = {};
+let petRenderSeq = 0, petT3 = null;
+async function loadMadePets() {
+  try {
+    const r = await (await fetch('/api/pet/forms')).json();
+    const m = {};
+    for (const x of (r.items || [])) m[x.id] = x;
+    MADE = m;
+  } catch { MADE = {}; }
+  renderPet();
+}
+
 function renderPet() {
   const p = petPref();
-  const form = PET_FORMS.some((f) => f.id === p.form) ? p.form : 'card';
   const body = $('#petbody');
   if (!body) return;
+  // ⭐ 旋转开关：**默认转**，只有明确写了 false 才停（读者 2026-10-13）。
+  //   ⚠️⚠️ 主界面这一只以前**完全没有这一段** —— 设置里勾了"不转"，
+  //      桌面上那只照样转，而且**一个错都不报**。
+  //      （症状和"开关坏了"一模一样，人只会去怀疑设置页。）
+  const spin = p.spin !== false;
+  // 自己造的那些 id 是 `u-<名字>`，不在内置名单里
+  const mine = String(p.form || '').startsWith('u-') ? String(p.form).slice(2) : '';
+  const made = mine ? MADE[mine] : null;
+  const custom = !!mine;
+  const builtin = custom ? null : formOf(p.form);
+  const form = custom ? p.form : (builtin && PET_FORMS.some((f) => f.id === p.form) ? p.form : 'card');
+  // ⭐ 内置的也有带深度图的（银/铅/锌那三种矿物）—— **有深度图的一律走真 3D**，
+  //   和桌面上那只收在同一个口上（两条渲染路必然漂移）。
+  const kind = custom ? (made && made.depth ? '3d' : 'slab')
+    : (builtin && builtin.depth && builtin.img) ? '3d'
+      : (form === 'card' ? 'card' : 'orb');
+  if (form !== p.form && !custom) petSave({ form });   // 名单里没有的 id ⇒ 存回卡片，别一直白着
+  if (petT3) { try { petT3.dispose(); } catch { /* 释放失败不能挡住下一只 */ } petT3 = null; }
+  const seq = ++petRenderSeq;
   // ⚠️ 类名 `ptcard` 而不是 `card` —— 见 app.css 里 `.orbbg.ckon` 那段（撞上通用 `.card`）
-  body.className = 'petbody' + (form === 'card' ? ' ptcard' : ORB_KEYED[form] ? ' mono' : '');
+  body.className = 'petbody' + (kind === 'card' ? ' ptcard'
+    : kind === 'slab' ? ' pslab' : kind === '3d' ? ' p3d'
+      : ORB_KEYED[form] ? ' mono' : '');
+  // ⚠️ 三种形态各有各的停法：视频要单独 pause；卡片/叠层吃 CSS 类；
+  //    **3D 是 WebGL，CSS 完全管不着**（由 pet3d 那边 setSpin 停 rAF）。
+  body.classList.toggle('pstill', !spin);
   // ⚠️ 卡片形态用**同一张原图**（src/ui/assets/card.png），不是重画的
   //
   // ⭐ 矿物三种在 Pet 里用**已经抠好白底的动图 webp**（`*-mini.webp`），不是那段原视频：
@@ -2431,16 +2470,31 @@ function renderPet() {
   //      所以这里用图最省事；
   //    · 用原视频的话，这个圆里就是**一块白饼** —— 白底在这层没法抠。
   //    抠的做法见 src/ui/assets/README.md。
-  body.innerHTML = form === 'card'
+  // ⭐ 自己造的那两只（`3d` / `slab`）和内置的走**同一条渲染路**（同一个 pet3d.js）
+  const img = custom ? ((made && made.img) || `/pets/${encodeURIComponent(mine)}.png`)
+    : (builtin && builtin.img) || '';
+  const depthUrl = custom ? (made && made.depth) : (builtin && builtin.depth) || '';
+  body.innerHTML = kind === 'card'
     // ⭐ 卡片形态在 Pet 里**不是一张平铺的图**，而是和语音屏那颗同构的**多层卡**
     //   （同一个 card.png + 同一套层叠厚度），靠 CSS `scale(.305)` 缩下来、慢慢左右摆。
     //   读者 2026-10-10：「在 cevtuopet 时候卡片不动要改变，**要旋转**」。
     ? '<div class="ck" id="petck"></div>'
-    : (ORB_KEYED[form]
-      ? `<img src="/ui/assets/mineral-${form}-mini.webp" alt="">`
-      : `<video src="${ORB_VIDEO[form]}" muted loop autoplay playsinline></video>`);
+    : kind === 'slab' ? '<div class="slab" id="petslab"></div>'
+      : kind === '3d' ? '<canvas id="pet3dc" width="104" height="104"></canvas>'
+        : (ORB_KEYED[form]
+          ? `<img src="/ui/assets/mineral-${form}-mini.webp" alt="">`
+          : `<video src="${ORB_VIDEO[form]}" muted loop autoplay playsinline></video>`);
   // ⚠️ 先挂进 DOM 再 buildCard —— 游离的元素上 `$('#petck')` 查不到（这个坑记过）
-  if (form === 'card') buildCard($('#petck'), 2, 10);
+  if (kind === 'card') buildCard($('#petck'), 2, 10);
+  if (kind === 'slab') buildSlab($('#petslab'), img);
+  if (!spin) body.querySelectorAll('video').forEach((v) => { try { v.pause(); } catch { /* 忽略 */ } });
+  if (kind === '3d') {
+    const c = $('#pet3dc');
+    PET3D.mountPet3D(c, img, depthUrl, { spin }).then((m) => {
+      if (seq !== petRenderSeq) { m.dispose(); return; }   // 期间又换了一次 ⇒ 这只作废
+      petT3 = m;
+    }).catch(() => { if (seq === petRenderSeq) body.innerHTML = '<div class="slab" id="petslab"></div>'; if (seq === petRenderSeq) buildSlab($('#petslab'), img); });
+  }
   const pet = $('#pet');
   if (pet) pet.dataset.form = form;
   if (p.x != null && p.y != null) {
@@ -2568,7 +2622,10 @@ function petInit() {
   if (!pet) return;
   if (petPref().on) document.body.classList.add('pet-on');
   petPaintLetters();
+  // ⚠️ 先画一遍（自己造的那只这时还不知道有没有深度图，会先按叠层画），
+  //    再去问服务端 —— 反过来会先空一块，而"空"和"坏了"长得一样。
   renderPet();
+  loadMadePets();
   // 拖
   let dragging = false, dx = 0, dy = 0, moved = 0;
   pet.addEventListener('pointerdown', (e) => {

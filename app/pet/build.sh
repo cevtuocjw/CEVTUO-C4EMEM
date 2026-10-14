@@ -41,8 +41,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
        LaunchServices / `open -a` 认哪个全凭运气（表现是"点了图标没反应"）。 -->
   <key>CFBundleIdentifier</key><string>com.cevtuo.pet</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.1</string>
-  <key>CFBundleVersion</key><string>2</string>
+  <key>CFBundleShortVersionString</key><string>0.1.3</string>
+  <key>CFBundleVersion</key><string>4</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
@@ -57,6 +57,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   </dict>
 </dict></plist>
 PLIST
+
+# ── ⭐ 2D→3D 要用的三方件（34MB）─────────────────────────────
+# ⚠️ 它们**不在 git 里**（.gitignore 挡了）—— 仓库里只留一个拉取脚本。
+#    不在这里拉的话，打包会**静默出来一个"3D 用不了"的包**
+#    （页面能开、按钮能点，只有造 Pet 的时候才失败），这正是"看起来成功"那一类。
+bash "$PROJECT/scripts/fetch-pet3d.sh"
 
 echo "编译中…"
 swiftc -O -swift-version 5 \

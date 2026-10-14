@@ -172,6 +172,10 @@ api('/api/apps').then((a) => {
 // ⚠️ 名单住在 `/ui/petforms.js`，两边都 import 它 —— 各写一份必然漂移，
 //    而漂移的症状是「这里能选、选了 Pet 变空白」，且一个错都不报。
 import { PET_FORMS } from '/ui/petforms.js';
+// ⭐ 2D → **真 3D**（读者 2026-10-14：「不是仅仅加厚」）。
+//    深度模型在这里跑**一次**（约 4 秒），结果存成一张灰度 PNG 跟着这只 Pet 走；
+//    桌面上那只 Pet 的窗口**不跑模型**，它只读那张图。
+import * as PET3D from '/ui/pet3d.js';
 const FORM_KEY = 'c4emem.pet';
 const petPref = () => { try { return JSON.parse(localStorage.getItem(FORM_KEY) || '{}'); } catch { return {}; } };
 const petSave = (p) => localStorage.setItem(FORM_KEY, JSON.stringify({ ...petPref(), ...p }));
@@ -183,7 +187,13 @@ let madePets = [];
  *    表现是「做好了，但没法选它」，而会话里刚说了一句"做好了"（自相矛盾）。
  */
 function allForms() {
-  return [...PET_FORMS, ...madePets.map((x) => ({ id: 'u-' + x.id, nm: x.nm, kind: 'static', img: '/pets/' + x.id + '.png', made: x }))];
+  // ⚠️ `kind` 要**照实**带出去：有深度图的那些是 `3d`（真 3D），没有的是 `slab`（叠层）。
+  //    一律写 `static` 的症状是"做完了、装上去了，但它还是张平面图"，
+  //    而用户会以为"3D 那个功能没做"。
+  return [...PET_FORMS, ...madePets.map((x) => ({
+    id: 'u-' + x.id, nm: x.nm, kind: x.depth ? '3d' : 'slab',
+    img: x.img || ('/pets/' + x.id + '.png'), depth: x.depth, made: x,
+  }))];
 }
 async function loadForms() {
   const r = await api('/api/pet/forms').catch(() => ({ items: [] }));
@@ -192,14 +202,25 @@ async function loadForms() {
 }
 function paintFormChips() {
   $('#forms').innerHTML = allForms().map((f) => {
-    const inner = f.kind === 'static' ? '<img src="' + f.img + '" alt="">'
+    const inner = (f.kind === 'slab' || f.kind === '3d') ? '<img src="' + f.img + '" alt="">'
       : f.kind === 'card' ? '<img src="/ui/assets/card.png" alt="">'
         : f.keyed ? '<img src="/ui/assets/mineral-' + f.id + '-mini.webp" alt="">'
           : '<video src="' + f.video + '" muted loop autoplay playsinline preload="metadata"></video>';
+    // ⚠️ 徽标要把**真 3D** 和"叠层"分开写 —— 都写"你造的"的话，
+    //    做完一只 3D 的和一只叠层的在列表里长得一样。
+    // ⚠️ 内置那三种矿物现在也是 **3D** —— 标成"动的"的话，
+    //    "能转"和"只是有个动画"在列表里就分不出来。
+    const kd = f.kind === '3d' ? (f.made ? '你造的 · 3D' : '3D')
+      : f.kind === 'slab' ? (f.made ? '你造的 · 平面' : '图 · 不转')
+        : f.kind === 'card' ? '卡片' : (f.depth ? '3D' : '动的');
     return '<div class="fchip" data-id="' + f.id + '"><div class="box">' + inner + '</div>' +
       '<span class="nm">' + f.nm + '</span>' +
-      '<span class="kd">' + (f.made ? '你造的' : f.kind === 'static' ? '图 · 不转' : f.kind === 'card' ? '卡片' : '动的') + '</span>' +
-      (f.made ? '<button class="ghost sm" data-del="' + f.made.id + '">删</button>' : '') + '</div>';
+      '<span class="kd">' + kd + '</span>' +
+      (f.made ? '<button class="ghost sm" data-del="' + f.made.id + '">删</button>' : '') +
+      // ⭐ 老的那些（3D 这条路存在之前做的）没有深度图 ⇒ 依旧是叠层。
+      //   ⚠️ 不给这个按钮的话，使用者只会看到"我按了 3D，它一点没变"。
+      (f.made && !f.depth ? '<button class="go sm" data-mk3d="' + f.made.id + '">做成 3D</button>' : '') +
+      '</div>';
   }).join('');
   document.querySelectorAll('.fchip').forEach((c) => (c.onclick = (e) => {
     if (e.target.closest('[data-del]')) return;      // ⚠️ 点「删」别把它当成"选中"
@@ -207,6 +228,27 @@ function paintFormChips() {
     petSave({ form: curForm });
     paintForms();
     bridge({ cmd: 'reloadPet' });
+  }));
+  // ── 「做成 3D」：给老的一只补深度图 ────────────────────────────
+  document.querySelectorAll('[data-mk3d]').forEach((b) => (b.onclick = async (e) => {
+    e.stopPropagation();                       // ⚠️ 别把它当成"选中这一只"
+    const id = b.dataset.mk3d;
+    const chip = b.closest('.fchip');
+    const say = (t, bad) => { $('#mkmsg').innerHTML = '<span class="' + (bad ? 'bad' : 'ok') + '">' + esc(t) + '</span>'; };
+    b.disabled = true; say('在量这一只的深浅（第一次要十几秒）…');
+    try {
+      const src = (madePets.find((x) => x.id === id) || {}).img || ('/pets/' + id + '.png');
+      const d = await PET3D.estimateDepth(src, (m) => say(m));
+      say('在存…');
+      const r = await post('/api/pet/depth', { id, depth: PET3D.depthToDataURL(d), depthW: d.w, depthH: d.h });
+      if (r.error) { b.disabled = false; return say(r.error, true); }
+      await loadForms(); paintForms();
+      bridge({ cmd: 'reloadPet' });
+      say('好了 —— 「' + (madePets.find((x) => x.id === id) || {}).nm + '」现在是能转的真 3D 了。');
+    } catch (err) {
+      b.disabled = false;
+      say('量深度没成：' + String(err.message).slice(0, 70) + '（这一只照样能用，只是仍旧是叠层）', true);
+    }
   }));
   document.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async (e) => {
     e.stopPropagation();
@@ -274,6 +316,14 @@ $('#prefDock').onchange = savePrefs;
 let mkSrc = null;      // { dataUrl, from }
 let mkCut = null;      // { dataUrl, w, h, cover }
 let mkDims = null;
+/**
+ * ⭐ 深度图（`{w,h,data}`）—— 有它这只就是**真 3D**，没有就退回叠层。
+ * ⚠️ 存的是 `null` 还是"算好了"要分得开：**算失败不是错误**（模型没起来、
+ *    图太怪…），退回叠层照样能用；但界面上要**如实说**是哪一种。
+ */
+let mkDepth = null;
+/** 预览里那只转着的东西（换一张图要先 dispose，否则 WebGL 上下文会越积越多） */
+let mkT3 = null;
 
 /** 抠底：从四条边泛洪 + 只留最大连通域 + 羽化。算法与 `app/pet/cut-pet.mjs` 同一套。 */
 async function keyOut(dataUrl, SIZE = 512, PAD = 0.07) {
@@ -358,8 +408,29 @@ async function showPreview() {
   box.innerHTML = '<figure><div class="fr a"><img src="' + mkSrc.dataUrl + '"></div><figcaption>原图</figcaption></figure>' +
     '<span style="font-size:20px;color:#aaa">→</span>' +
     '<figure><div class="fr b"><img src="' + mkCut.dataUrl + '"></div>' +
-    '<figcaption>抠好了 · 主体占 ' + (mkCut.cover*100).toFixed(0) + '%</figcaption></figure>';
+    '<figcaption>抠好了 · 主体占 ' + (mkCut.cover*100).toFixed(0) + '%</figcaption></figure>' +
+    // ⭐ 第三个格子是**真的在转**的一只（和桌面上那只同一套代码）
+    //   ⚠️ 摆一张静态截图不行 —— "转起来长什么样"正是这里唯一要看的
+    (mkDepth ? '<span style="font-size:20px;color:#aaa">→</span>' +
+      '<figure><div class="fr b"><canvas id="mk3dc" width="150" height="150"></canvas></div>' +
+      '<figcaption id="mk3dcap">3D · 正在装…</figcaption></figure>' : '');
   $('#mkname').style.display = '';
+  if (mkDepth) {
+    if (mkT3) { try { mkT3.dispose(); } catch { /* 释放失败也不挡下一只 */ } mkT3 = null; }
+    try {
+      const rot = petPref().spin !== false;
+      // ⚠️ 不传 `n` —— 用 pet3d.js 里那个默认值，**和桌面上那只一模一样**。
+      //    传 160 的话预览和实际是两套几何（50,562 面 vs 79,202 面），
+      //    "看到的不是拿到的"，而且**看不出哪里不对**。
+      mkT3 = await PET3D.mountPet3D($('#mk3dc'), mkCut.dataUrl, PET3D.depthToDataURL(mkDepth), { spin: rot });
+      const cap = $('#mk3dcap');
+      if (cap) cap.textContent = '3D · ' + mkT3.tris.toLocaleString() + ' 个三角面 · ' + (rot ? '在转' : '定住了');
+    } catch (e) {
+      // ⚠️ 装不上要**说出来**，并且说清"存下来的还是能用的那只"（退回叠层）
+      const cap = $('#mk3dcap');
+      if (cap) cap.textContent = '3D 装不上（' + String(e.message).slice(0, 40) + '）· 会退回叠层';
+    }
+  }
 }
 
 async function takeImage(dataUrl, from) {
@@ -368,9 +439,23 @@ async function takeImage(dataUrl, from) {
     mkSrc = { dataUrl, from };
     mkCut = await keyOut(dataUrl);
     mkDims = [mkCut.w, mkCut.h];
+    // ── ① 先出"抠好了"的预览（用户马上有反馈），② 再花几秒算深度 ──
+    mkDepth = null;
     await showPreview();
-    $('#mkmsg').innerHTML = '<span class="ok">抠好了。</span>给它起个名字，然后按「做出来」——' +
-      '它会出现在上面的「它长什么样」里，也出现在桌面上那个 Pet 上。';
+    $('#mkmsg').textContent = '抠好了。在量它有多深（第一次要十几秒）…';
+    try {
+      mkDepth = await PET3D.estimateDepth(mkCut.dataUrl, (m) => { $('#mkmsg').textContent = m; });
+      // ⚠️ 深度图也要和抠好的图**一样大**（512²）—— 不一样的话
+      //    网格上 UV 对不齐，表现是"纹理和起伏错位"，而且**不报错**。
+      await showPreview();
+      $('#mkmsg').innerHTML = '<span class="ok">做好了。</span>给它起个名字，然后按「做出来」——' +
+        '它会出现在上面的「它长什么样」里，也出现在桌面上那个 Pet 上（<b>能转的真 3D</b>）。';
+    } catch (e) {
+      await showPreview();
+      $('#mkmsg').innerHTML = '<span class="ok">抠好了。</span>' +
+        '<span class="bad">但量深度没成（' + esc(String(e.message).slice(0, 60)) + '）</span> —— ' +
+        '这只照样能做，只是会做成**有厚度的平面**（叠层），不是真 3D。';
+    }
   } catch (e) {
     $('#mkmsg').innerHTML = '<span class="bad">抠不了：' + esc(e.message) + '</span>';
   }
@@ -423,11 +508,16 @@ $('#mksave').onclick = async () => {
   const name = $('#mknamein').value.trim();
   if (!name) { $('#mkmsg').innerHTML = '<span class="bad">先给它起个名字</span>'; return; }
   $('#mkmsg').textContent = '在装上…';
-  const r = await post('/api/pet/save', { name, dataUrl: mkCut.dataUrl, cover: mkCut.cover, w: mkCut.w, h: mkCut.h, from: mkSrc.from });
+  const r = await post('/api/pet/save', {
+    name, dataUrl: mkCut.dataUrl, cover: mkCut.cover, w: mkCut.w, h: mkCut.h, from: mkSrc.from,
+    // ⭐ 深度图一起存 —— 有它这只在桌面上才是**能转的真 3D**
+    ...(mkDepth ? { depth: PET3D.depthToDataURL(mkDepth), depthW: mkDepth.w, depthH: mkDepth.h } : {}),
+  });
   if (r.error) { $('#mkmsg').innerHTML = '<span class="bad">' + esc(r.error) + '</span>'; return; }
   $('#mkmsg').innerHTML = '<span class="ok">做好了：「' + esc(r.item.nm) + '」。</span>' +
     '去上面「它长什么样」里点它，桌面上那个就会换过去。';
-  mkCut = null; $('#mkname').style.display = 'none'; $('#mkprev').innerHTML = '';
+  if (mkT3) { try { mkT3.dispose(); } catch { /* 同上 */ } mkT3 = null; }
+  mkCut = null; mkDepth = null; $('#mkname').style.display = 'none'; $('#mkprev').innerHTML = '';
   $('#mklist').innerHTML = ''; $('#mknamein').value = '';
   await loadForms();
 };
