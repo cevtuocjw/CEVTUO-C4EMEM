@@ -19,6 +19,7 @@
  *    **搬的时候不要把注释删掉** —— 删了就等于把这些坑重新埋回去。
  */
 import Cocoa
+import UniformTypeIdentifiers
 import WebKit
 import Carbon
 
@@ -87,7 +88,7 @@ final class PetWebView: WKWebView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
     // ── 菜单栏 + 窗口 ──
     private var statusItem: NSStatusItem?
     private var petWindow: NSWindow?
@@ -351,6 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         cfg.userContentController.add(self, name: "c4")
         let wv = PetWebView(frame: NSRect(origin: .zero, size: kPetIdle), configuration: cfg)
         wv.navigationDelegate = self
+        wv.uiDelegate = self        // ⭐ 不挂这个，「选文件」就永远不会弹面板（见文件末尾那段）
         // ⚠️⚠️ **不能写成 `if wv.responds(to: Selector("setDrawsBackground:"))`** ——
         //    那个 key 是 KVC 私有的，`responds(to:)` 对它**返回 false**，
         //    于是这一句被跳过、WebView 留着白底 ⇒ 桌面上多一块白板（而窗口确实开了）。
@@ -600,9 +602,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = true
         yieldActivation()
-        NSWorkspace.shared.openApplication(at: url, configuration: cfg) { app, err in
-            if let err { petLog("launch ❌ \(path): \(err.localizedDescription)") }
-            else { petLog("launch \(url.lastPathComponent) ok") }
+        NSWorkspace.shared.openApplication(at: url, configuration: cfg) { [weak self] app, err in
+            if let err { petLog("launch ❌ \(path): \(err.localizedDescription)"); return }
+            petLog("launch \(url.lastPathComponent) ok")
+            guard let app else { return }
+            // ⭐ **不靠隐藏自己**的兜底：万一目标 App 没抢到前台，就**再激活它一次**。
+            //   ⚠️⚠️ 老代码在这里靠的是"把宠物藏起来让路"，而那正是读者看到的那个闪。
+            //      这一条替代它：**宠物一直留着**，要动就动"目标 App 的激活"。
+            let target = app.processIdentifier
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) { [weak self] in
+                guard let self else { return }
+                if NSWorkspace.shared.frontmostApplication?.processIdentifier != target {
+                    app.activate()
+                    petLog("launch 兜底：再推一次 \(url.lastPathComponent) 到前台")
+                }
+                self.assertPetVisible("launch +0.3s")   // ⚠️ 顺手再确认宠物还在
+            }
         }
     }
 
@@ -616,31 +631,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     /**
-     * ⭐⭐⭐ **让位**：把宠物窗口从屏幕上撤下、把自己取消激活，0.55 秒后**无声**放回来。
+     * ⭐⭐⭐ **让位**：把"活动 App"这个身份让出去 —— **但宠物一步都不许离开屏幕。**
      *
-     * ⚠️ 为什么非要有这一步：**我们占着"活动 App"的时候，谁都不许把别的 App 叫到前面**
-     *   —— in-process 的 `activate`、`osascript`、`open -a` 三条路都试过，一条都不生效。
-     * ⚠️ 放回**必须用 `order(.above, relativeTo: 0)`**，不能用 `orderFrontRegardless()`
-     *   —— 后者会把前台又抢回来，目标刚上来就被顶下去。
+     * ⚠️⚠️⚠️ 读者 2026-10-14（他原话：「这个要**写死**，让你改过很多次了」）：
+     *   「我点击周围的 app 时候，中间这个 pet，**又开始闪一下**，
+     *     我希望**完全不闪，一直在**。」
      *
-     * ⚠️⚠️⚠️ **我第一版写的是 `NSApp.hide(nil)`** —— 那是**整个 App 的所有窗口**，
-     *   而 pet 就是这个 App 的窗口 ⇒ **一点软件，宠物自己也不见了**。
-     *   读者 2026-10-13 的原话：「我点击中间软件 logo 之后**所有的一起消失了，
-     *   连同中间的 pet，pet 不应该消失才对**」。
-     *   ⚠️ 而这段"先藏 0.55s 再放回来"的写法，**c4emem 里早就有**
-     *      （`C4ememApp.swift` 的 `yieldPetActivation`，注释比这还长）。
-     *      我在新 App 里重写时**把它退回了最朴素那版** —— 这是一个仓库里已经学过的教训。
-     *   ⇒ 抄的时候**连注释一起抄**：注释就是防止下一次退回去的东西。
+     * 真凶就是原来这一句 `petWindow?.orderOut(nil)` + 0.55 秒之后再放回：
+     * 那 0.55 秒里**窗口真的不在屏幕上**（录屏里第 46~55 帧整块是空的，只剩鼠标）。
+     *
+     * ⚠️ 为什么可以不要它：
+     *   · "让位"要的是**取消自己的激活状态**，不是把自己藏起来 —— 那句是 `NSApp.deactivate()`；
+     *   · 宠物窗本来就是 `hidesOnDeactivate = false` + `level = .floating`
+     *     ⇒ 自己失活它**照样在屏幕上**（这正是我们要的效果）。
+     *
+     * ⚠️⚠️ 为什么"延时放回"也必须**一起**删掉：
+     *   只要代码里还留着"藏起来 → 过一会儿再放回"这个**形状**，
+     *   就一定会有人（包括我自己）去调那个延时、去换 `order` / `orderFrontRegardless` ——
+     *   而每一个变体都会闪。**要删的是形状本身，不是那个数字。**
+     *
+     * ⚠️ 那"万一别处把它弄没了"呢：`assertPetVisible` 会**当场**放回来（不延时、不淡入），
+     *   并且留一行日志。判据是 `petWindow.isVisible`，不是"我调过 showPet 了"。
      */
     private func yieldActivation() {
         petTookFocus = false
-        let wasVisible = petWindow?.isVisible ?? false
-        if wasVisible { petWindow?.orderOut(nil) }
         NSApp.deactivate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
-            guard let self else { return }
-            // ⚠️ 这里**只放回宠物自己**，而且必须是 `order(.above, …)`
-            if wasVisible { self.petWindow?.order(.above, relativeTo: 0) }
+        // ⭐ 让位之后立刻确认它还在屏幕上
+        assertPetVisible("让位之后")
+        // ⚠️ launch 是异步的：目标 App 起来后的几百毫秒里，窗口服务器还可能重排一次。
+        //    再确认三次 —— 但**只确认、从不隐藏、也不延时放回**。
+        for delay in [0.10, 0.35, 0.80] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.assertPetVisible("让位 +\(delay)s")
+            }
+        }
+    }
+
+    /**
+     * **宠物必须在屏幕上；不在就立刻放回来。**
+     *
+     * ⚠️ 这个函数**永远只做"放回"，永远不做"藏起来"** ——
+     *    把它单独抽出来，是为了让"藏"这件事在整个文件里**只有一处**
+     *    （菜单里那个「显示 / 隐藏 Pet」，`togglePet()`），`grep orderOut` 就能数出来。
+     *    ⇒ 以后谁再想在启动路径上藏它一下，都得先看见这段注释。
+     */
+    private func assertPetVisible(_ where_: String) {
+        // 用户自己在菜单里关掉的，不许硬开回来
+        let on = UserDefaults.standard.object(forKey: kPetOnKey) == nil
+            ? true : UserDefaults.standard.bool(forKey: kPetOnKey)
+        guard on, let w = petWindow else { return }
+        if !w.isVisible {
+            petLog("⚠️ 宠物不见了（\(where_)）—— 立刻放回，不走延时")
+            w.orderFrontRegardless()
         }
     }
 
@@ -683,6 +725,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             cfg.userContentController.add(self, name: "c4")
             let wv = WKWebView(frame: w.contentView!.bounds, configuration: cfg)
             wv.autoresizingMask = [.width, .height]
+            // ⭐⭐ 设置页就是「一起造一只新的」那一页 —— **不挂 uiDelegate，选文件永远没反应**
+            wv.uiDelegate = self
+            wv.navigationDelegate = self
             w.contentView = wv
             settingsWindow = w
         }
@@ -722,3 +767,37 @@ let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)      // 真正的策略在 didFinishLaunching 里按偏好定
 app.run()
+
+// ════════════════════════════════════════════════════════════════════
+//  ⭐⭐⭐ 「选文件」那一半：**WKWebView 自己不会开文件面板**
+// ════════════════════════════════════════════════════════════════════
+//
+// ⚠️⚠️⚠️ 读者 2026-10-14：「支持选文件和贴链接**一个都不好用**！！！」
+//    真因：网页里的 `<input type="file">` 点了以后，WebKit 会去问宿主的
+//    UI 代理 `webView(_:runOpenPanelWith:initiatedByFrame:completionHandler:)`。
+//    **代理没实现 = 什么都不发生** —— 不报错、按钮也不变灰、控制台一个字都没有。
+//    （两个 App 原来都只有 `navigationDelegate`，**没有 `uiDelegate`**。）
+//
+// ⚠️ 所以"点了没反应"和"这个功能没做"在这里长得一模一样 ——
+//    而它离"网页写错了"也很像。以后凡是 `<input type="file">` / `<select>` 在
+//    WKWebView 里没反应，先来看这里，不要先去改网页。
+extension AppDelegate {
+    func webView(_ webView: WKWebView,
+                 runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.allowedContentTypes = [.image]
+        panel.message = "挑一张图 —— 它会变成一只可以转的 3D Pet"
+        panel.prompt = "用它"
+        let done: (NSApplication.ModalResponse) -> Void = { r in
+            completionHandler(r == .OK && !panel.urls.isEmpty ? panel.urls : nil)
+        }
+        // ⚠️ 挂在窗口上当 sheet（不然面板可能跑到别的窗口后面，看起来像"没弹出来"）
+        if let host = webView.window { panel.beginSheetModal(for: host, completionHandler: done) }
+        else { panel.begin(completionHandler: done) }
+    }
+}

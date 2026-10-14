@@ -38,6 +38,17 @@
   .mklist img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid rgba(0,0,0,.12);cursor:pointer}
   .mklist img.on{border-color:#b9d92e;box-shadow:0 0 0 2px rgba(215,242,74,.5)}
   .mkprev{display:flex;gap:14px;align-items:center;margin:10px 0}
+  /* 拖放区：平时是个安静的虚线框，图拖到窗口上任何地方它就亮起来 */
+  .mkdrop{border:1.5px dashed rgba(0,0,0,.18);border-radius:12px;padding:16px 18px;margin:4px 0 10px;
+    display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+  .mkdrop b{font-size:14.5px}
+  .mkdrop span{font-size:12.5px;color:var(--dim,#888);line-height:1.9}
+  .mkdrop kbd{font:inherit;font-size:12px;border:1px solid rgba(0,0,0,.2);border-bottom-width:2px;
+    border-radius:5px;padding:0 5px;background:#fafafa}
+  .mkdrop .lk{color:#2b6cb0;text-decoration:underline;cursor:pointer}
+  body.dragging .mkdrop{border-color:#7aa93c;background:rgba(215,242,74,.10)}
+  body.dragging::after{content:'';position:fixed;inset:0;z-index:90;background:rgba(215,242,74,.05);
+    border:3px dashed rgba(122,169,60,.5);border-radius:16px;pointer-events:none}
   .mkprev figure{margin:0;text-align:center}
   .mkprev .fr{width:150px;height:150px;display:grid;place-items:center;border-radius:12px;overflow:hidden}
   .mkprev .fr.a{background:#fff;border:1px solid rgba(0,0,0,.10)}
@@ -107,9 +118,19 @@
   <!-- ── 一起造一只新的 ── -->
   <div class="card sec">
     <div class="m">一起造一只新的</div>
-    <div class="k" style="margin-bottom:8px">给它一张图（本地上传，或者给个网页链接让我把里面的图列出来），
-      我把它<b>抠成没有背景的</b>，然后它就变成你可以随时切过去的一个形态。</div>
-    <div class="row"><label>本地上传</label><input type="file" id="mkfile" accept="image/*"></div>
+    <div class="k" style="margin-bottom:8px">给它<b>随便一张 2D 图</b> —— 我抠掉背景、量出深浅，
+      重建成一只<b>能转的真 3D</b>。然后它就变成你可以随时切过去的一个形态。</div>
+    <!-- ⭐ 三个入口一个都不能少：粘贴 / 拖进来 / 选文件。
+         ⚠️⚠️ 读者 2026-10-14：「这里粘贴复制，**软件都处理不了**」——
+            原来只有"选文件"和"贴链接"两条，**粘贴和拖拽都不认**。
+            而粘贴是这三条里最顺手的一条（截图之后直接 ⌘V）。 -->
+    <div id="mkdrop" class="mkdrop">
+      <b>把图拖到这里</b>
+      <span>或者直接按 <kbd>⌘V</kbd> 粘贴（截图之后就能用）· 或者
+        <button class="ghost sm" id="mkpaste">读剪贴板</button> ·
+        <label class="lk">选文件<input type="file" id="mkfile" accept="image/*" hidden></label>
+      </span>
+    </div>
     <div class="row"><label>或给个链接</label><input id="mkurl" placeholder="https://…（我会列出这个页面上所有的图）">
       <button class="ghost" id="mkprobe">看看有什么</button></div>
     <div id="mklist" class="mklist"></div>
@@ -326,6 +347,35 @@ let mkDepth = null;
 let mkT3 = null;
 
 /** 抠底：从四条边泛洪 + 只留最大连通域 + 羽化。算法与 `app/pet/cut-pet.mjs` 同一套。 */
+/**
+ * ⭐⭐ 把一张**随便什么** 2D 图变成"能拿来做 Pet 的一张图"。
+ *
+ * ⚠️⚠️ 读者 2026-10-14：「我**给你随便一个 2D 图片**你能处理成 3D 然后做成 pet……
+ *    你为什么做不到！」「一个都不好用！！！」
+ *    原来这一支**只有一条路**：从四边泛洪猜背景色 → 抠 → 只留最大连通域。
+ *    猜错就 `throw`，于是一张白底 logo、一张已经抠好的透明图、一张纯色图
+ *    **一律"抠不了"** —— 而那正是"随便一个图"里最常见的三种。
+ *
+ * 现在它是**四级降级，永不抛**（每一级都如实告诉用户走的是哪一级）：
+ *   ① 这张图**本来就有透明底** ⇒ 直接用它的 alpha，不去猜背景
+ *   ② 四边泛洪抠得动 ⇒ 用抠出来的（最干净）
+ *   ③ 抠出来几乎是空的 / 一个像素不剩 ⇒ **原样不抠**，照样能做 3D
+ *   ④ 连原图都读不动 ⇒ 这才是真的失败（唯一还会抛的那一种）
+ */
+/** ③ 那一级：**不抠**，只把整张原图按比例摆进一个正方形里（居中、留白）。 */
+function fitOnly(img, SIZE, PAD, why) {
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const inner = SIZE * (1 - PAD * 2);
+  const k = Math.min(inner / w, inner / h);
+  const dw = Math.round(w * k), dh = Math.round(h * k);
+  const o = document.createElement('canvas'); o.width = SIZE; o.height = SIZE;
+  const og = o.getContext('2d'); og.imageSmoothingQuality = 'high';
+  og.drawImage(img, Math.round((SIZE-dw)/2), Math.round((SIZE-dh)/2), dw, dh);
+  const od = og.getImageData(0, 0, SIZE, SIZE).data;
+  let n = 0; for (let i = 3; i < od.length; i += 4) if (od[i] > 24) n++;
+  return { dataUrl: o.toDataURL('image/png'), w: SIZE, h: SIZE, cover: n / (SIZE*SIZE), cut: false, why };
+}
+
 async function keyOut(dataUrl, SIZE = 512, PAD = 0.07) {
   const img = new Image();
   img.src = dataUrl;
@@ -337,6 +387,14 @@ async function keyOut(dataUrl, SIZE = 512, PAD = 0.07) {
   g.drawImage(img, 0, 0);
   const d = g.getImageData(0, 0, w, h);
   const px = d.data;
+  // ⭐ ① 这张图**自己就是抠好的**（有相当一部分透明）⇒ 直接用它，不猜背景色。
+  //    ⚠️ 去猜的话：透明像素的 RGB 是 (0,0,0)，会把"角落颜色"定成黑，
+  //      而一张白底 logo 立刻就被判成"一个像素都不剩"。
+  {
+    let clear = 0;
+    for (let i = 3; i < px.length; i += 4) if (px[i] < 24) clear++;
+    if (clear > w * h * 0.03) return fitOnly(img, SIZE, PAD, '这张图本来就没有背景，直接用它');
+  }
   const at = (x, y) => { const i = (y * w + x) * 4; return [px[i], px[i+1], px[i+2]]; };
   const cs = [at(2,2), at(w-3,2), at(2,h-3), at(w-3,h-3)];
   const med = (k) => { const a = cs.map(v => v[k]).sort((x,y)=>x-y); return a[1]; };
@@ -384,7 +442,9 @@ async function keyOut(dataUrl, SIZE = 512, PAD = 0.07) {
     }
     if (!best || n > best.n) best = { n, bx0, by0, bx1, by1 };
   }
-  if (!best) throw new Error('抠完之后一个像素都不剩 —— 这张图可能本来就是纯色底');
+  // ⚠️ ③ 抠空了 **不抛**，退回"原样不抠"。抛出去的话这张图就彻底用不了了，
+  //    而它其实完全能做成 3D（只是会带着自己的背景）。
+  if (!best || best.n < w * h * 0.004) return fitOnly(img, SIZE, PAD, '这张图的底抠不出来（背景太杂或本来就是纯色）');
   for (let k = 0; k < w*h; k++) if (solid[k] && !seen[k]) px[k*4+3] = 0;
   g.putImageData(d, 0, 0);
   const bw = best.bx1 - best.bx0 + 1, bh = best.by1 - best.by0 + 1;
@@ -398,9 +458,10 @@ async function keyOut(dataUrl, SIZE = 512, PAD = 0.07) {
   let solidN = 0;
   for (let i = 3; i < od.length; i += 4) if (od[i] > 24) solidN++;
   const cover = solidN / (SIZE*SIZE);
-  // ⚠️ 抠过头要**当场说**：只剩一点点 = 背景色选错了或这是一张纯色图
-  if (cover < 0.02) throw new Error('抠出来几乎是空的（主体只占 ' + (cover*100).toFixed(1) + '%）—— 这张图可能本来就没什么主体');
-  return { dataUrl: o.toDataURL('image/png'), w: SIZE, h: SIZE, cover };
+  // ⚠️ 抠过头（只剩一点点）也**不抛** —— 同样是"这张图不适合按背景色抠"，
+  //    退回原样。判据是"能不能拿去做 Pet"，不是"抠得干不干净"。
+  if (cover < 0.02) return fitOnly(img, SIZE, PAD, '抠出来几乎是空的（背景色跟主体太像）');
+  return { dataUrl: o.toDataURL('image/png'), w: SIZE, h: SIZE, cover, cut: true };
 }
 
 async function showPreview() {
@@ -408,7 +469,7 @@ async function showPreview() {
   box.innerHTML = '<figure><div class="fr a"><img src="' + mkSrc.dataUrl + '"></div><figcaption>原图</figcaption></figure>' +
     '<span style="font-size:20px;color:#aaa">→</span>' +
     '<figure><div class="fr b"><img src="' + mkCut.dataUrl + '"></div>' +
-    '<figcaption>抠好了 · 主体占 ' + (mkCut.cover*100).toFixed(0) + '%</figcaption></figure>' +
+    '<figcaption>' + (mkCut.cut ? '抠好了 · 主体占 ' + (mkCut.cover*100).toFixed(0) + '%' : '没抠底 · 原样') + '</figcaption></figure>' +
     // ⭐ 第三个格子是**真的在转**的一只（和桌面上那只同一套代码）
     //   ⚠️ 摆一张静态截图不行 —— "转起来长什么样"正是这里唯一要看的
     (mkDepth ? '<span style="font-size:20px;color:#aaa">→</span>' +
@@ -433,6 +494,18 @@ async function showPreview() {
   }
 }
 
+/** 把某个网址**当成一张图**取回来（服务端取 ⇒ 不污染画布）。`hint` 是上一步失败的原因，取不到时一起显示。 */
+async function takeImageFromUrl(url, hint) {
+  $('#mkmsg').textContent = '在把它取回来…';
+  const f = await post('/api/pet/fetch', { url });
+  if (f.error) {
+    $('#mkmsg').innerHTML = '<span class="bad">取不到这张图：' + esc(f.error) + '</span>' +
+      (hint ? '<br><span class="k">（当成网页也试过了：' + esc(hint) + '）</span>' : '');
+    return;
+  }
+  await takeImage(f.dataUrl, '链接：' + url);
+}
+
 async function takeImage(dataUrl, from) {
   $('#mkmsg').textContent = '在抠底…';
   try {
@@ -442,14 +515,16 @@ async function takeImage(dataUrl, from) {
     // ── ① 先出"抠好了"的预览（用户马上有反馈），② 再花几秒算深度 ──
     mkDepth = null;
     await showPreview();
-    $('#mkmsg').textContent = '抠好了。在量它有多深（第一次要十几秒）…';
+    $('#mkmsg').textContent = (mkCut.cut ? '抠好了。' : '（' + esc(mkCut.why || '') + '—— 先按原样做。）') + '在量它有多深（第一次要十几秒）…';
     try {
       mkDepth = await PET3D.estimateDepth(mkCut.dataUrl, (m) => { $('#mkmsg').textContent = m; });
       // ⚠️ 深度图也要和抠好的图**一样大**（512²）—— 不一样的话
       //    网格上 UV 对不齐，表现是"纹理和起伏错位"，而且**不报错**。
       await showPreview();
-      $('#mkmsg').innerHTML = '<span class="ok">做好了。</span>给它起个名字，然后按「做出来」——' +
-        '它会出现在上面的「它长什么样」里，也出现在桌面上那个 Pet 上（<b>能转的真 3D</b>）。';
+      $('#mkmsg').innerHTML = '<span class="ok">做好了。</span>' +
+        (mkCut.cut ? '' : '<span class="k">（' + esc(mkCut.why || '') + ' —— 这一只会带着它自己的背景，照样能转。）</span> ') +
+        '给它起个名字，然后按「做出来」——它会出现在上面的「它长什么样」里，' +
+        '也出现在桌面上那个 Pet 上（<b>能转的真 3D</b>）。';
     } catch (e) {
       await showPreview();
       $('#mkmsg').innerHTML = '<span class="ok">抠好了。</span>' +
@@ -461,19 +536,97 @@ async function takeImage(dataUrl, from) {
   }
 }
 
-$('#mkfile').onchange = (e) => {
-  const f = e.target.files && e.target.files[0];
+/* ══ ⭐⭐ 四条入口，一个都不能少：粘贴 / 拖进来 / 选文件 / 链接 ══════════
+   读者 2026-10-14：「我这里粘贴复制，**软件都处理不了**」「支持选文件和贴链接
+   **一个都不好用**！！！」
+
+   ⚠️⚠️ "选文件"不生效的**真因在 Swift 那边**，不在这一页：
+      WKWebView 里 `<input type="file">` 必须由宿主实现
+      `WKUIDelegate.webView(_:runOpenPanelWith:…)` —— **没实现 = 点了什么都不发生**
+      （不报错、按钮也不变灰）。两个 App 原来都没有。
+      ⇒ 见 `app/pet/PetApp.swift` 的 `AppDelegate: WKUIDelegate`。
+   ⚠️ 所以**粘贴/拖拽这两条是必须的备份**：它们不经过那个面板，宿主没接也照样能用。 */
+
+const fileToDataUrl = (f) => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(String(r.result));
+  r.onerror = () => rej(new Error('这个文件读不出来'));
+  r.readAsDataURL(f);
+});
+const firstImage = (list) => [...(list || [])].find((f) => f && /^image\//.test(f.type));
+
+/** 四条入口最后都走它 —— 入口多、出口只有一个，"能放什么"就只需要维护一处 */
+async function feedFile(f, how) {
   if (!f) return;
-  const rd = new FileReader();
-  rd.onload = () => takeImage(String(rd.result), '本地上传：' + f.name);
-  rd.readAsDataURL(f);
+  if (!/^image\//.test(f.type || '')) {
+    $('#mkmsg').innerHTML = '<span class="bad">这不是一张图</span>（' + esc(f.type || f.name || '不知道类型') + '）—— 图片格式才行。';
+    return;
+  }
+  try {
+    const url = await fileToDataUrl(f);
+    await takeImage(url, how);
+  } catch (e) {
+    $('#mkmsg').innerHTML = '<span class="bad">' + esc(e.message) + '</span>';
+  }
+}
+
+// ① 选文件
+$('#mkfile').onchange = (e) => feedFile(e.target.files && e.target.files[0], '本地上传：' + (e.target.files[0] || {}).name);
+
+// ② 粘贴（⌘V）—— ⚠️ 剪贴板里是**文字**时一律放行（那是要粘进输入框的），
+//    只有**图片**才拦。图片本来也粘不进输入框，拦住不影响任何正常操作。
+addEventListener('paste', (e) => {
+  const f = firstImage(e.clipboardData && e.clipboardData.files)
+    || firstImage([...((e.clipboardData && e.clipboardData.items) || [])].map((i) => (i.kind === 'file' ? i.getAsFile() : null)));
+  if (!f) return;                       // 文字 ⇒ 走默认行为
+  e.preventDefault();
+  feedFile(f, '粘贴：' + (f.name || '剪贴板里的图'));
+});
+
+// ③ 拖进来（拖到窗口**任何地方**都算 —— 拖到一个小框里太难打中）
+const hasFiles = (e) => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes('Files');
+addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); document.body.classList.add('dragging'); } });
+addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+addEventListener('drop', (e) => {
+  if (!hasFiles(e)) return;             // ⚠️ 只拦"文件"。别把页面里正常的拖拽（比如拖一段字）吃掉
+  e.preventDefault();
+  document.body.classList.remove('dragging');
+  const f = firstImage(e.dataTransfer.files);
+  if (!f) { $('#mkmsg').innerHTML = '<span class="bad">拖进来的不是图片</span>（<code>text/uri-list</code> 里的链接请贴到下面那个框里）。'; return; }
+  feedFile(f, '拖进来的：' + (f.name || '一张图'));
+});
+
+// ④ 读剪贴板（按钮版）—— ⚠️ 浏览器可能不给 `clipboard.read()` 权限，
+//    被拦时要**说清还有 ⌘V 那条路**，不能只说"失败"。
+$('#mkpaste').onclick = async () => {
+  try {
+    const items = await navigator.clipboard.read();
+    for (const it of items) {
+      const t = (it.types || []).find((x) => /^image\//.test(x));
+      if (t) { const b = await it.getType(t); return void feedFile(new File([b], 'clipboard.png', { type: t }), '剪贴板'); }
+    }
+    $('#mkmsg').innerHTML = '<span class="bad">剪贴板里没有图片。</span>先截个图（⇧⌘4），或者直接按 <kbd>⌘V</kbd>。';
+  } catch {
+    $('#mkmsg').innerHTML = '<span class="bad">读剪贴板被系统挡住了。</span>没关系 —— **直接按 ⌘V** 就行（不需要权限）。';
+  }
 };
 
 $('#mkprobe').onclick = async () => {
-  const url = $('#mkurl').value.trim();
+  let url = $('#mkurl').value.trim();
   if (!url) return;
+  // ⚠️ 没写协议就补上 —— 用户十次有八次贴的是 `example.com/x.png`，
+  //    而 `fetch('example.com/x.png')` 在服务端会当成相对路径直接失败，
+  //    报出来的是"抓不到"，看起来像站点的问题。
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url.replace(/^\/\//, '');
+  // ⭐ 贴的是**一张图**（.png/.jpg/…）就直接取回来 —— 别再去"列出这个页面的图"，
+  //    那样只会得到一句"一张图都没找到"，而用户明明给了一张图。
+  if (/\.(png|jpe?g|gif|webp|bmp|avif)(\?|#|$)/i.test(url)) {
+    return void takeImageFromUrl(url);
+  }
   $('#mkmsg').textContent = '在看那个页面…';
   const r = await post('/api/pet/probe', { url });
+  // ⚠️ 抓不到就**把它当成一张图再试一次**（很多图床的地址没有扩展名）
+  if (r.error) return void takeImageFromUrl(url, r.error);
   if (r.error) { $('#mkmsg').innerHTML = '<span class="bad">' + esc(r.error) + '</span>'; return; }
   // ⚠️ 一张都没有时要**说清为什么**（页面不执行 JS ⇒ 纯前端渲染的站会列得很空），
   //    不能丢一个空白区域让人猜。

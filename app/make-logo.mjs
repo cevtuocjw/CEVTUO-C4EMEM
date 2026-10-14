@@ -10,10 +10,19 @@
  *    · 读者给的就是**线稿**（不是那张银色渲染图）—— 他要的是"描出来的"那一支；
  *    · 线稿在任何尺寸下都清楚（Dock 16px 上照片会糊成一团灰）。
  *
+ * ⚠️⚠️⚠️ **千万别去"清洗"那个 `<svg>` 的开始标签。**
+ *    2026-10-14 我干过一次：为了让 CSS 控制尺寸，把 `^<svg[^>]*>` 整个换成了
+ *    `<svg xmlns=… viewBox=…>` —— **连带把 `fill="none" stroke="currentColor"
+ *    stroke-width="5"` 一起删了** ⇒ 路径退回默认的 `fill: black` ⇒
+ *    图标变成**一团黑剪影**（在深色底盘上几乎看不见）。
+ *    而且我**只看过 rose-line.png，没看过图标**，于是它一路打进了 dmg。
+ *    ⇒ 尺寸交给 CSS 就行（CSS 本来就压过 width/height 属性），**原样内联**。
+ *    ⇒ 以及：**生成完先看图再打包。**
+ *
  * 跑：bun app/make-logo.mjs
  *     出 `app/pet/rose-line.svg`（源）和 `app/pet/rose-line.png`（512，给设置页/分发页）
  */
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, existsSync } from 'node:fs';
 import { chromium } from '/Users/cjw/Documents/CEVTUO-Z/node_modules/playwright/index.mjs';
 
 const HERE = '/Users/cjw/Documents/Cevtuo-C4emem/app';
@@ -135,7 +144,7 @@ const iconHtml = `<!doctype html>
     filter:drop-shadow(0 10px 22px rgba(0,0,0,.45))}
 </style></head>
 <body>
-  <div class="plate">${svg.replace(/^<svg[^>]*>/, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 360">').replace(/\n\s*width="[^"]*" height="[^"]*"/, '')}</div>
+  <div class="plate">${svg}</div>
 </body></html>
 `;
 writeFileSync(`${HERE}/pet/icon.html`, iconHtml);
@@ -157,7 +166,9 @@ await p2.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
   .tiny{display:flex;gap:16px;align-items:flex-end}
   .plate{display:flex;align-items:center;justify-content:center;border-radius:22%;
     background:radial-gradient(120% 120% at 28% 18%, #2c2b31 0%, #1b1a1f 58%, #131217 100%);}
-  .plate svg{color:#e9e7e2}
+  /* ⚠️ 每一格都**必须**用 CSS 把 svg 的高度压住 —— SVG 自己带着 width/height 属性，
+     不压的话它就按 240×360 的固有尺寸画，把整个阶梯撑烂（生成完一定要看图）。 */
+  .plate svg{color:#e9e7e2;height:100%;width:auto;display:block}
 </style></head><body>
   <div class="row">
     <div class="big">${svg}</div>
@@ -165,7 +176,7 @@ await p2.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
       <div class="onwhite" style="margin-bottom:18px">${svg}</div>
       <div class="tiny">
         ${[16, 32, 64, 128, 256].map((s) => `<div><div class="plate" style="width:${s}px;height:${s}px">
-          <div style="height:${(s * 0.68).toFixed(1)}px;display:flex">${svg.replace(`width="${W}" height="${H}"`, '')}</div></div>
+          <div style="height:${(s * 0.68).toFixed(1)}px;display:flex;justify-content:center">${svg}</div></div>
           <div style="font-size:11px;margin-top:6px">${s}px</div></div>`).join('')}
       </div>
     </div>
@@ -173,5 +184,29 @@ await p2.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
 </body></html>`, { waitUntil: 'load' });
 await p2.waitForTimeout(300);
 await p2.screenshot({ path: '/tmp/logo-review.png' });
-await br.close();
 console.log('✅ app/pet/rose-line.png · 审核图 → /tmp/logo-review.png');
+
+// ── 顺带把**分发页**那几张也更新掉（同一个 logo 不能有两份源）──────────
+// ⚠️ 只在那个仓库存在时才写（这台机器上在；别人的机器上可能没有）。
+try {
+  const U = process.env.HOME + '/Library/Application Support/CEVTUO-RWP-build/usersite/cevtuopet/assets';
+  if (existsSync(U)) {
+    const sizes = [['logo.png', 512, '#141414', false], ['favicon-32.png', 32, '#141414', false],
+                   ['favicon-16.png', 16, '#141414', false], ['apple-touch-icon.png', 180, '#e9e7e2', true]];
+    for (const [name, px, color, plate] of sizes) {
+      const q = await br.newPage({ viewport: { width: px, height: px } });
+      await q.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
+        html,body{margin:0;width:${px}px;height:${px}px;background:transparent;overflow:hidden}
+        .w{width:${px}px;height:${px}px;display:flex;align-items:center;justify-content:center;
+           ${plate ? `border-radius:${Math.round(px * 0.225)}px;background:radial-gradient(120% 120% at 28% 18%, #2c2b31 0%, #1b1a1f 58%, #131217 100%)` : ''}}
+        svg{height:${Math.round(px * (plate ? 0.68 : 0.94))}px;width:auto;color:${color}}
+      </style></head><body><div class="w">${svg}</div></body></html>`, { waitUntil: 'load' });
+      await q.waitForTimeout(80);
+      await q.screenshot({ path: `${U}/${name}`, omitBackground: true });
+      await q.close();
+    }
+    console.log('✅ 分发页 logo / favicon 也一起更新了（' + U + '）');
+  }
+} catch (e) { console.log('⚠️ 分发页那几张没更新成：' + e.message); }
+
+await br.close();

@@ -10,6 +10,7 @@
 //   · 核心是 HTTP 服务 ⇒ 以后 Android / 眼镜端复用同一个核心，这里不需要重写。
 
 import Cocoa
+import UniformTypeIdentifiers
 import WebKit
 import UserNotifications
 // ⚠️ 全局快捷键要走 Carbon 的 `RegisterEventHotKey` —— **它不需要辅助功能授权**。
@@ -122,7 +123,7 @@ private func jsStr(_ s: String) -> String {
     return "''"
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
     private var statusItem: NSStatusItem!
     private var statusLine: NSMenuItem!
     private var window: NSWindow?
@@ -1160,6 +1161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let wv = WKWebView(frame: w.contentView?.bounds ?? .zero, configuration: cfg)
             wv.autoresizingMask = [.width, .height]
             wv.navigationDelegate = self
+        wv.uiDelegate = self        // ⭐ 不挂这个，「选文件」就永远不会弹面板（见文件末尾那段）
             w.contentView = wv
             window = w
             webView = wv
@@ -1298,3 +1300,37 @@ app.delegate = delegate
         //      点 Dock 图标走的是 `reopen` ⇒ 直接把主界面叫出来（`applicationShouldHandleReopen`）。
         app.setActivationPolicy(.regular) // Dock + 菜单栏都占（读者要求能在 Dock 里看见）
 app.run()
+
+// ════════════════════════════════════════════════════════════════════
+//  ⭐⭐⭐ 「选文件」那一半：**WKWebView 自己不会开文件面板**
+// ════════════════════════════════════════════════════════════════════
+//
+// ⚠️⚠️⚠️ 读者 2026-10-14：「支持选文件和贴链接**一个都不好用**！！！」
+//    真因：网页里的 `<input type="file">` 点了以后，WebKit 会去问宿主的
+//    UI 代理 `webView(_:runOpenPanelWith:initiatedByFrame:completionHandler:)`。
+//    **代理没实现 = 什么都不发生** —— 不报错、按钮也不变灰、控制台一个字都没有。
+//    （两个 App 原来都只有 `navigationDelegate`，**没有 `uiDelegate`**。）
+//
+// ⚠️ 所以"点了没反应"和"这个功能没做"在这里长得一模一样 ——
+//    而它离"网页写错了"也很像。以后凡是 `<input type="file">` / `<select>` 在
+//    WKWebView 里没反应，先来看这里，不要先去改网页。
+extension AppDelegate {
+    func webView(_ webView: WKWebView,
+                 runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.allowedContentTypes = [.image]
+        panel.message = "挑一张图 —— 它会变成一只可以转的 3D Pet"
+        panel.prompt = "用它"
+        let done: (NSApplication.ModalResponse) -> Void = { r in
+            completionHandler(r == .OK && !panel.urls.isEmpty ? panel.urls : nil)
+        }
+        // ⚠️ 挂在窗口上当 sheet（不然面板可能跑到别的窗口后面，看起来像"没弹出来"）
+        if let host = webView.window { panel.beginSheetModal(for: host, completionHandler: done) }
+        else { panel.begin(completionHandler: done) }
+    }
+}
