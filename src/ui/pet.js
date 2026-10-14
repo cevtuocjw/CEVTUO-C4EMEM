@@ -111,7 +111,9 @@ void SLAB_LAYERS;
 
 /** ⭐ 转一圈几秒（设置里那个转速滑杆）。⚠️ 缺省必须和 petsettings.html 的 SPEED_DEF 一样 */
 const SPEED_DEF = 18;
-const petPeriod = () => { const v = Number(petPref().period); return v >= 4 && v <= 40 ? v : SPEED_DEF; };
+const petPeriod = () => { const v = Number(petPref().period); return v >= 2 && v <= 40 ? v : SPEED_DEF; };   // ⚠️ 下限是 **2**（读者指定）——写成 4 的话「最快 2 秒」会被静默换成 18 秒
+/** ⭐ 怎么转：'swing' = 摆（120° 弧）/ 'full' = 连续 360°。⚠️ 三个地方口径必须一样 */
+const petMode = () => (petPref().mode === 'full' ? 'full' : 'swing');
 function renderPet() {
   const p = petPref();
   const spin = p.spin !== false;      // 默认转：只有**明确写了 false** 才停
@@ -176,7 +178,7 @@ async function mount3d(f, spin) {
   const c = $('#pet3dc');
   if (!c) return;
   try {
-    const m = await PET3D.mountPet3D(c, f.img, f.depth, { spin, period: petPeriod() });
+    const m = await PET3D.mountPet3D(c, f.img, f.depth, { spin, period: petPeriod(), mode: petMode() });
     if (token !== renderSeq) { m.dispose(); return; }   // 期间又换了一次 ⇒ 这只作废
     T3 = m;
     report(`3d 挂上了 ${f.nm} tris=${m.tris} spin=${spin}`);

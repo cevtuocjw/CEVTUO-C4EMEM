@@ -93,9 +93,20 @@
     <!-- ⭐ 转速（读者 2026-10-14：「增加一个旋转速度调节在设置里」）。
          ⚠️ 存的是**秒/圈**（period），不是"1..5 档" —— 档位是个中间量，
             换个形态就得重新映射一次；秒是物理量，谁都读得懂。 -->
+    <!-- ⭐ 怎么转（读者 2026-10-14：「给出来 120 度转回还是连续 360 度转的选项」）-->
+    <div class="row" style="margin-top:8px">
+      <label>怎么转</label>
+      <select id="spinMode" style="min-width:190px">
+        <option value="swing">摆过来摆过去（120° 的弧）</option>
+        <option value="full">连续转（整整一圈 360°）</option>
+      </select>
+      <span class="k">「摆」是从侧面看它转过身的样子；「连续转」是一直往一个方向转圈。</span>
+    </div>
+    <!-- ⭐ 转速。⚠️ 最快 2 秒（读者指定）；单位是**秒**，而且跟着上面那个模式走：
+         「摆」= 一次来回几秒，「连续转」= 转一圈几秒。 -->
     <div class="row" style="margin-top:8px">
       <label>转多快</label>
-      <input type="range" id="spinSpeed" min="4" max="40" step="1" style="width:190px">
+      <input type="range" id="spinSpeed" min="2" max="40" step="1" style="width:190px">
       <span class="k" id="spinSpeedTxt"></span>
     </div>
   </div>
@@ -295,12 +306,14 @@ function paintSpin() { $('#spinOn').checked = petPref().spin !== false; }
 const SPEED_DEF = 18;
 const paintSpeed = () => {
   const v = Number(petPref().period) || SPEED_DEF;
+  const mode = petPref().mode === 'full' ? 'full' : 'swing';
   $('#spinSpeed').value = String(v);
-  // ⚠️ 把**秒数**写出来（不要只给一个 1~10 的档位）——用户要能对得上自己看到的速度
-  $('#spinSpeedTxt').textContent = v <= 8 ? `很快 · 转一圈 ${v} 秒`
-    : v <= 16 ? `偏快 · 转一圈 ${v} 秒`
-      : v <= 24 ? `正常 · 转一圈 ${v} 秒`
-        : `很慢 · 转一圈 ${v} 秒`;
+  $('#spinMode').value = mode;
+  // ⚠️ 把**秒数**和**这一圈指什么**一起写出来 —— 只写"偏快"的话，
+  //    "摆"和"连续转"两种模式下的"快"根本不是一回事。
+  const what = mode === 'full' ? '转一圈' : '一次来回';
+  $('#spinSpeedTxt').textContent =
+    (v <= 4 ? '很快' : v <= 10 ? '偏快' : v <= 20 ? '正常' : '很慢') + ` · ${what} ${v} 秒`;
 };
 function paintForms() {
   document.querySelectorAll('.fchip').forEach((c) => c.classList.toggle('on', c.dataset.id === curForm));
@@ -687,7 +700,12 @@ $('#spinSpeed').oninput = () => {
 $('#spinSpeed').onchange = () => {
   petSave({ period: Number($('#spinSpeed').value) || SPEED_DEF });
   bridge({ cmd: 'reloadPet' });
-  $('#mkmsg').textContent = '转一圈 ' + (Number($('#spinSpeed').value) || SPEED_DEF) + ' 秒。';
+};
+$('#spinMode').onchange = () => {
+  petSave({ mode: $('#spinMode').value });
+  paintSpeed();
+  bridge({ cmd: 'reloadPet' });
+  $('#mkmsg').textContent = $('#spinMode').value === 'full' ? '它会一直转圈。' : '它摆过来摆过去。';
 };
 
 $('#mksave').onclick = async () => {

@@ -226,7 +226,19 @@ const loadImg = (src) => new Promise((res, rej) => {
  * @returns {Promise<{setSpin:(b:boolean)=>void, setAngle:(a:number)=>void, dispose:()=>void, tris:number}>}
  */
 export async function mountPet3D(canvas, petUrl, depthUrl, opts = {}) {
-  const { spin = true, amp = 0.30, deg = 26, period = 18 } = opts;
+  /* ⚠️⚠️ 读者 2026-10-14 的原话点破了这里真正的毛病：
+     「**由于你旋转的不是 360 度，所以你转的不是一圈**，所以导致现在一圈的速度很慢，
+       即使最快的 4 秒档位也是。你需要给出来 120 度转回还是**连续 360 度转**的选项，
+       然后最快一圈是 2 秒。」
+     ⇒ 我原来写的是 `sin(t) * 26°` —— **来回摆 ±26°，一共才 52°**。
+        它却按 `period` 秒走完一个正弦周期 ⇒ "18 秒转一圈"这个说法是**假的**，
+        实际 18 秒只摆了 52°，而且两端还会**减速停一下**（正弦的驻点）。
+     ⇒ 现在两个模式，而且**速度的含义跟着模式走**：
+        · `swing` 摆：±60°（**120° 的弧**来回），`period` = **一次来回**几秒
+        · `full`  转：**连续 360°**，`period` = **转一圈**几秒
+        ⚠️ `full` 用 `ph * 360` 而不是 `sin` —— 正弦在两端会慢下来，看着一顿一顿的；
+           连续转必须**匀速**。 */
+  const { spin = true, amp = 0.30, mode = 'swing', deg = 60, period = 18 } = opts;
   const [THREE, img, dimg] = await Promise.all([loadThree(), loadImg(petUrl), loadImg(depthUrl)]);
   const dw = opts.depthW || 512, dh = opts.depthH || 512;
   const dc = document.createElement('canvas'); dc.width = dw; dc.height = dh;
@@ -275,7 +287,9 @@ export async function mountPet3D(canvas, petUrl, depthUrl, opts = {}) {
   const draw = (ms) => {
     if (!t0) t0 = ms;
     const ph = ((ms - t0) / 1000 / period) % 1;                 // 0..1
-    const ang = on ? (Math.sin(ph * Math.PI * 2) * deg) : 0;    // 不转 ⇒ 正对着（不是"冻在当场"）
+    const ang = !on ? 0
+      : mode === 'full' ? ph * 360                             // 连续匀速转一圈
+        : Math.sin(ph * Math.PI * 2) * deg;                    // 摆：±deg（120° 弧）
     pivot.rotation.y = ang * Math.PI / 180;
     pivot.rotation.x = 0.06;
     r.render(scene, cam);

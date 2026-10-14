@@ -2435,7 +2435,9 @@ async function loadMadePets() {
 
 /** ⭐ 转一圈几秒（设置里那个转速滑杆）—— 和 pet.js / petsettings.html 同一口径 */
 const SPEED_DEF = 18;
-const petPeriod = () => { const v = Number(petPref().period); return v >= 4 && v <= 40 ? v : SPEED_DEF; };
+const petPeriod = () => { const v = Number(petPref().period); return v >= 2 && v <= 40 ? v : SPEED_DEF; };   // ⚠️ 下限是 **2**（读者指定）——写成 4 的话「最快 2 秒」会被静默换成 18 秒
+/** ⭐ 怎么转：'swing' = 摆（120° 弧）/ 'full' = 连续 360°。⚠️ 三个地方口径必须一样 */
+const petMode = () => (petPref().mode === 'full' ? 'full' : 'swing');
 function renderPet() {
   const p = petPref();
   const body = $('#petbody');
@@ -2493,7 +2495,7 @@ function renderPet() {
   if (!spin) body.querySelectorAll('video').forEach((v) => { try { v.pause(); } catch { /* 忽略 */ } });
   if (kind === '3d') {
     const c = $('#pet3dc');
-    PET3D.mountPet3D(c, img, depthUrl, { spin, period: petPeriod() }).then((m) => {
+    PET3D.mountPet3D(c, img, depthUrl, { spin, period: petPeriod(), mode: petMode() }).then((m) => {
       if (seq !== petRenderSeq) { m.dispose(); return; }   // 期间又换了一次 ⇒ 这只作废
       petT3 = m;
     }).catch(() => { if (seq === petRenderSeq) body.innerHTML = '<div class="slab" id="petslab"></div>'; if (seq === petRenderSeq) buildSlab($('#petslab'), img); });
